@@ -64,7 +64,7 @@ _pplyz は入力 CSV をそのまま上書きします。元データを残し�
    default_output = "is_relevant:bool,summary:str"
    ```
 
-3. 読み込み順は「環境変数 → `~/.config/pplyz/config.toml`」。別の場所を使いたい場合は `PPLYZ_CONFIG_DIR=/path/to/dir` を設定して、そのディレクトリに `config.toml` を置きます。
+3. 読み込み順は「環境変数 → 設定ファイル」。既定は `~/.config/pplyz/config.toml`（Windows は `%APPDATA%\\pplyz\\config.toml`、`XDG_CONFIG_HOME` があればそちらを使用）。別の場所を使いたい場合は `PPLYZ_CONFIG_DIR=/path/to/dir` を設定して、そのディレクトリに `config.toml` を置きます。
 
 ワンポイント: `pplyz data/papers.csv --input title,abstract --output 'summary:str'` のように、最初の引数をそのまま入力 CSV として扱えます。
 

@@ -66,7 +66,7 @@ Run `uvx pplyz --help` for every flag.
    default_output = "is_relevant:bool,summary:str"
    ```
 
-3. At runtime pplyz loads settings in this order: environment variables → `~/.config/pplyz/config.toml`. To keep configs elsewhere, set `PPLYZ_CONFIG_DIR=/path/to/dir` and place `config.toml` there.
+3. At runtime pplyz loads settings in this order: environment variables → config file. The default path is `~/.config/pplyz/config.toml` (or `%APPDATA%\\pplyz\\config.toml` on Windows; if `XDG_CONFIG_HOME` is set, it uses that). To keep configs elsewhere, set `PPLYZ_CONFIG_DIR=/path/to/dir` and place `config.toml` there.
 
 Tip: `pplyz data/papers.csv --input title,abstract --output 'summary:str'` uses the positional `data/papers.csv` as the CSV input.
 
