@@ -12,6 +12,7 @@ wheels/
 # Local secrets/config
 .env
 llmap.local.toml
+pplyz.local.toml
 
 # Data files
 data/
