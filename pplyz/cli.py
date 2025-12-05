@@ -82,9 +82,8 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     output_help = (
-        'Output fields definition (e.g., "is_relevant:bool,summary:str,keywords:list[str]"). '
-        "Supported types: bool, int, float, str, list[str], list[int], list[float], "
-        "list[bool], dict."
+        'Output fields definition (e.g., "is_relevant:bool,summary:str"). '
+        "Supported types: bool, int, float, str."
     )
 
     parser.add_argument(

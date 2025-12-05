@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field, create_model
 def parse_type_string(type_str: str) -> Type:
     """Parse a type string into a Python type.
 
+    Only CSV-friendly scalar types are supported: str, int, float, bool.
+
     Args:
-        type_str: Type string like "str", "int", "float", "bool", "list[str]", "list[int]"
+        type_str: Type string like "str", "int", "float", "bool"
 
     Returns:
         Python type object
@@ -18,18 +20,9 @@ def parse_type_string(type_str: str) -> Type:
     Examples:
         >>> parse_type_string("str")
         <class 'str'>
-        >>> parse_type_string("list[str]")
-        typing.List[str]
     """
     type_str = type_str.strip().lower()
 
-    # Handle list types
-    if type_str.startswith("list[") and type_str.endswith("]"):
-        inner_type_str = type_str[5:-1]
-        inner_type = parse_type_string(inner_type_str)
-        return List[inner_type]  # type: ignore
-
-    # Handle basic types
     type_mapping = {
         "str": str,
         "string": str,
@@ -38,14 +31,14 @@ def parse_type_string(type_str: str) -> Type:
         "float": float,
         "bool": bool,
         "boolean": bool,
-        "list": list,
-        "dict": dict,
     }
 
     if type_str in type_mapping:
         return type_mapping[type_str]
 
-    raise ValueError(f"Unsupported type: {type_str}")
+    raise ValueError(
+        f"Unsupported type: {type_str}. Allowed types: bool, int, float, str."
+    )
 
 
 def parse_schema_string(schema_str: str) -> Dict[str, Type]:
