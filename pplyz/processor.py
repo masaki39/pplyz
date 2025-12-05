@@ -83,14 +83,13 @@ class CSVProcessor:
         input_path = Path(input_path)
         output_path = Path(output_path)
 
+        if response_model is None:
+            raise ValueError(
+                "Output schema is required. Dynamic schema is not supported."
+            )
+
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
-
-        # Snapshot of the original input columns (best-effort; may equal output when in-place)
-        try:
-            original_input_columns = set(pd.read_csv(input_path).columns)
-        except Exception:
-            original_input_columns = set()
 
         # Load CSV - use output if it exists and resume is True
         if output_path.exists() and resume:
@@ -111,29 +110,10 @@ class CSVProcessor:
             )
 
         # Determine new column names
-        if response_model is not None:
-            new_column_names = get_field_names(response_model)
-        else:
-            # Resume mode with dynamic schema: try to infer output columns from existing file
-            inferred_outputs = [
-                col
-                for col in df.columns
-                if col not in columns and col not in original_input_columns
-            ]
-            if inferred_outputs:
-                new_column_names = inferred_outputs
-                logger.info(
-                    "Resume enabled -> inferred existing output columns: %s",
-                    ",".join(new_column_names),
-                )
-            else:
-                # Will be determined dynamically from first result
-                new_column_names = []
+        new_column_names = get_field_names(response_model)
 
         # Process each row
-        schema_info = (
-            ",".join(get_field_names(response_model)) if response_model else "dynamic"
-        )
+        schema_info = ",".join(new_column_names)
         logger.info(
             "Processing rows | model=%s | columns=%s | schema=%s",
             self.llm_client.model_name,
@@ -313,6 +293,11 @@ class CSVProcessor:
             response_model: Optional Pydantic model for structured output.
         """
         input_path = Path(input_path)
+
+        if response_model is None:
+            raise ValueError(
+                "Output schema is required. Dynamic schema is not supported."
+            )
 
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")

@@ -37,6 +37,8 @@ class TestProcessCSV:
         output_path = tmp_path / "output.csv"
 
         # Mock the LLM client's generate_structured_output
+        response_model = create_output_model_from_string("category:str,score:float")
+
         with patch.object(client, "generate_structured_output") as mock_generate:
             mock_generate.return_value = {"category": "test", "score": 0.9}
 
@@ -45,6 +47,7 @@ class TestProcessCSV:
                 output_path=output_path,
                 columns=["title", "abstract"],
                 prompt="Classify this research",
+                response_model=response_model,
             )
 
             # Check output file exists
@@ -62,12 +65,15 @@ class TestProcessCSV:
         client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
         processor = CSVProcessor(llm_client=client)
 
+        response_model = create_output_model_from_string("title:str")
+
         with pytest.raises(FileNotFoundError):
             processor.process_csv(
                 input_path=tmp_path / "nonexistent.csv",
                 output_path=tmp_path / "output.csv",
                 columns=["title"],
                 prompt="Test",
+                response_model=response_model,
             )
 
     def test_process_csv_with_invalid_columns(
@@ -79,12 +85,15 @@ class TestProcessCSV:
         client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
         processor = CSVProcessor(llm_client=client)
 
+        response_model = create_output_model_from_string("title:str")
+
         with pytest.raises(ValueError, match="Columns not found"):
             processor.process_csv(
                 input_path=sample_csv_file,
                 output_path=tmp_path / "output.csv",
                 columns=["nonexistent_column"],
                 prompt="Test",
+                response_model=response_model,
             )
 
     def test_process_csv_handles_row_errors(
@@ -97,6 +106,8 @@ class TestProcessCSV:
         processor = CSVProcessor(llm_client=client)
 
         output_path = tmp_path / "output.csv"
+
+        response_model = create_output_model_from_string("title:str")
 
         with patch.object(client, "generate_structured_output") as mock_generate:
             # First row succeeds, second fails, third succeeds
@@ -111,6 +122,7 @@ class TestProcessCSV:
                 output_path=output_path,
                 columns=["title"],
                 prompt="Test",
+                response_model=response_model,
             )
 
             # Output file should still be created
@@ -156,39 +168,6 @@ class TestProcessCSV:
         assert output_df.columns.tolist().count("score") == 1
         assert list(output_df["category"]) == ["first", "first", "first"]
 
-    def test_process_csv_resume_infers_dynamic_output_columns(
-        self, sample_csv_file, tmp_path, mock_env_vars
-    ):
-        """Resume mode should infer output columns when schema is dynamic."""
-        from pplyz.llm_client import LLMClient
-
-        client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
-        processor = CSVProcessor(llm_client=client)
-        output_path = tmp_path / "output.csv"
-
-        # First run: write dynamic output columns
-        with patch.object(client, "generate_structured_output") as mock_generate:
-            mock_generate.return_value = {"category": "initial", "notes": "ok"}
-            processor.process_csv(
-                input_path=sample_csv_file,
-                output_path=output_path,
-                columns=["title"],
-                prompt="Test",
-            )
-
-        # Resume should detect existing output columns and skip reprocessing
-        with patch.object(client, "generate_structured_output") as resume_generate:
-            processor.process_csv(
-                input_path=sample_csv_file,
-                output_path=output_path,
-                columns=["title"],
-                prompt="Test",
-            )
-            assert resume_generate.call_count == 0
-
-        output_df = pd.read_csv(output_path)
-        assert list(output_df["category"]) == ["initial", "initial", "initial"]
-
     def test_process_csv_retries_failed_rows(
         self, sample_csv_file, tmp_path, mock_env_vars
     ):
@@ -198,6 +177,8 @@ class TestProcessCSV:
         client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
         processor = CSVProcessor(llm_client=client)
         output_path = tmp_path / "output.csv"
+
+        response_model = create_output_model_from_string("category:str,score:float")
 
         with patch.object(client, "generate_structured_output") as mock_generate:
             mock_generate.side_effect = [
@@ -212,6 +193,7 @@ class TestProcessCSV:
                 output_path=output_path,
                 columns=["title"],
                 prompt="Test",
+                response_model=response_model,
             )
 
             output_df = pd.read_csv(output_path)
@@ -235,6 +217,8 @@ class TestPreviewSample:
         client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
         processor = CSVProcessor(llm_client=client)
 
+        response_model = create_output_model_from_string("preview:str")
+
         with patch.object(client, "generate_structured_output") as mock_generate:
             mock_generate.return_value = {"preview": "result"}
 
@@ -243,6 +227,7 @@ class TestPreviewSample:
                 columns=["title", "abstract"],
                 prompt="Test preview",
                 num_rows=2,
+                response_model=response_model,
             )
 
             # Check that generate was called twice (for 2 rows)
@@ -255,11 +240,14 @@ class TestPreviewSample:
         client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
         processor = CSVProcessor(llm_client=client)
 
+        response_model = create_output_model_from_string("preview:str")
+
         with pytest.raises(ValueError, match="Columns not found"):
             processor.preview_sample(
                 input_path=sample_csv_file,
                 columns=["invalid_column"],
                 prompt="Test",
+                response_model=response_model,
             )
 
     def test_preview_sample_default_num_rows(self, sample_csv_file, mock_env_vars):
@@ -269,11 +257,16 @@ class TestPreviewSample:
         client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
         processor = CSVProcessor(llm_client=client)
 
+        response_model = create_output_model_from_string("preview:str")
+
         with patch.object(client, "generate_structured_output") as mock_generate:
             mock_generate.return_value = {"preview": "result"}
 
             processor.preview_sample(
-                input_path=sample_csv_file, columns=["title"], prompt="Test"
+                input_path=sample_csv_file,
+                columns=["title"],
+                prompt="Test",
+                response_model=response_model,
             )
 
             # Default is 3 rows, but sample CSV only has 3 rows

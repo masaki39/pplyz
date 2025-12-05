@@ -174,6 +174,7 @@ uvx pplyz \
 - Keep prompts short and explicit about the JSON schema you expect to avoid parsing errors.
 - Use `--preview` before long or expensive CSV batches to validate prompts and model choice.
 - Resume mode is on by default; rows with existing output columns are skipped. Use `--force` to recompute everything.
+- Dynamic (schema-less) mode is not supported; always provide `--output` (or set `[pplyz].default_output`).
 
 ## Support & License
 
