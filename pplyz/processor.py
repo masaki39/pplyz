@@ -93,7 +93,7 @@ class CSVProcessor:
 
         # Load CSV - use output if it exists and resume is True
         if output_path.exists() and resume:
-            logger.info("Resume enabled -> loading existing output: %s", output_path)
+            logger.info("Loading existing output (resume): %s", output_path)
             df = pd.read_csv(output_path)
             logger.info("Loaded %d rows (resume mode)", len(df))
         else:
@@ -115,7 +115,7 @@ class CSVProcessor:
         # Process each row
         schema_info = ",".join(new_column_names)
         logger.info(
-            "Processing rows | model=%s | columns=%s | schema=%s",
+            "Processing rows | model=%s | input=%s | output=%s",
             self.llm_client.model_name,
             ",".join(columns),
             schema_info,
@@ -203,7 +203,7 @@ class CSVProcessor:
         logger.info("✓ Saved %d rows", len(output_df))
 
         # Print summary
-        separator = "=" * 40
+        separator = "=" * 50
         logger.info(separator)
         logger.info(
             "Summary | total=%d processed=%d skipped=%d success=%d errors=%d",

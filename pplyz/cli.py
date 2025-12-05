@@ -13,7 +13,6 @@ from pplyz.config import (
     DEFAULT_OUTPUT_FIELDS_ENV_VAR,
     DEFAULT_PREVIEW_ROWS,
     PREVIEW_ROWS_ENV_VAR,
-    SUPPORTED_MODELS,
     get_default_model,
 )
 from pplyz.llm_client import LLMClient
@@ -63,10 +62,11 @@ def parse_arguments() -> argparse.Namespace:
     Returns:
         Parsed arguments namespace.
     """
+    default_model = get_default_model()
+
     parser = argparse.ArgumentParser(
         usage="pplyz [INPUT] [options]",
         formatter_class=CompactHelpFormatter,
-        epilog=f"Docs & issues: {DOCS_URL}",
     )
 
     parser.add_argument(
@@ -104,8 +104,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Preview results on sample rows without saving",
     )
 
-    default_model = get_default_model()
-
     parser.add_argument(
         "--model",
         "-m",
@@ -119,21 +117,13 @@ def parse_arguments() -> argparse.Namespace:
         "-f",
         dest="force",
         action="store_true",
-        help="Force reprocessing of all rows and overwrite previous output",
+        help="Force reprocessing of all rows and overwrite previous output (resume is default)",
     )
     parser.add_argument(
         "--no-resume",
         dest="force",
         action="store_true",
         help=argparse.SUPPRESS,
-    )
-
-    parser.add_argument(
-        "--list",
-        "-l",
-        action="store_true",
-        dest="list_models",
-        help="List supported models and exit",
     )
 
     def _colorize_help(text: str) -> str:
@@ -144,6 +134,7 @@ def parse_arguments() -> argparse.Namespace:
             "usage:": color_text("usage:", "yellow"),
             "positional arguments:": color_text("positional arguments:", "cyan"),
             "options:": color_text("options:", "cyan"),
+            "Defaults:": color_text("Defaults:", "magenta"),
         }
         for key, val in replacements.items():
             text = text.replace(key, val)
@@ -151,6 +142,15 @@ def parse_arguments() -> argparse.Namespace:
 
     def _print_help(file=None):  # type: ignore[override]
         text = parser.format_help()
+        default_input = os.getenv(DEFAULT_INPUT_COLUMNS_ENV_VAR) or "(none)"
+        default_output = os.getenv(DEFAULT_OUTPUT_FIELDS_ENV_VAR) or "(none)"
+        defaults_block = (
+            "\nDefaults:\n"
+            f"  model : {default_model}\n"
+            f"  input : {default_input}\n"
+            f"  output: {default_output}\n"
+        )
+        text = text.rstrip() + defaults_block + f"\nDocs & issues: {DOCS_URL}\n"
         target = sys.stdout if file is None else file
         parser._print_message(_colorize_help(text), target)
 
@@ -186,10 +186,10 @@ def get_user_prompt() -> str:
         The user-provided prompt.
     """
     print("\n" + "=" * 60)
-    print("LLM ANALYSER - Interactive Prompt Input")
+    print("LLM ANALYSER - Prompt Input")
     print("=" * 60)
     print(
-        "\nPlease describe the task you want the LLM to perform on each row.\n"
+        "\nPlease enter the prompt you want the LLM to run for each row.\n"
         "The LLM will receive the selected columns and generate structured output.\n"
     )
     print("Examples:")
@@ -201,9 +201,9 @@ def get_user_prompt() -> str:
 
     try:
         if prompt_session is not None:
-            prompt = prompt_session.prompt("Enter your task description: ").strip()
+            prompt = prompt_session.prompt("Enter your prompt: ").strip()
         else:
-            prompt = input("Enter your task description: ").strip()
+            prompt = input("Enter your prompt: ").strip()
     except (KeyboardInterrupt, EOFError):
         print("\nPrompt entry cancelled. Exiting.")
         sys.exit(1)
@@ -257,12 +257,6 @@ def _build_prompt_session():
     )
 
 
-def list_supported_models() -> None:
-    """Print list of supported models."""
-    print("\n".join(SUPPORTED_MODELS.keys()))
-    print("\nMore providers: https://docs.litellm.ai/docs/providers")
-
-
 def main() -> None:
     """Main entry point for the LLM Analyser CLI."""
     # Load environment/configuration files
@@ -279,11 +273,6 @@ def main() -> None:
     resolved_input = positional_input
     resolved_columns = args.input_columns or default_columns
     resolved_fields = args.output_fields or default_fields
-
-    # Handle --list
-    if args.list_models:
-        list_supported_models()
-        sys.exit(0)
 
     # Validate required arguments (only if not using --list)
     missing_args = []
@@ -341,6 +330,16 @@ def main() -> None:
         except Exception as e:
             print(f"Error parsing fields: {e}")
             sys.exit(1)
+
+    run_mode = "force" if args.force else "resume"
+    logger.info(
+        "Run | file=%s | model=%s | input=%s | output=%s | mode=%s",
+        input_path,
+        args.model,
+        ",".join(columns),
+        resolved_fields,
+        run_mode,
+    )
 
     # Initialize LLM client
     logger.info("Initializing LLM client (model: %s)...", args.model)

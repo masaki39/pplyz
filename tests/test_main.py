@@ -5,13 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pplyz.cli import (
-    get_user_prompt,
-    list_supported_models,
-    main,
-    parse_arguments,
-    resolve_preview_rows,
-)
+from pplyz.cli import get_user_prompt, main, parse_arguments, resolve_preview_rows
 from pplyz.config import DEFAULT_PREVIEW_ROWS
 
 
@@ -104,15 +98,6 @@ class TestParseArguments:
 
             assert args.output_fields == "score:float,label:str"
 
-    def test_parse_with_list_option(self):
-        """Test parsing with list flag."""
-        test_args = ["pplyz", "--list"]
-
-        with patch.object(sys, "argv", test_args):
-            args = parse_arguments()
-
-        assert args.list_models is True
-
     def test_parse_positional_input(self):
         """Positional INPUT argument should populate input_path."""
         test_args = [
@@ -143,7 +128,6 @@ class TestParseArguments:
             "-o",
             "flag:bool",
             "-f",
-            "-l",
         ]
 
         with patch.object(sys, "argv", test_args):
@@ -155,7 +139,7 @@ class TestParseArguments:
         assert args.preview is True
         assert args.output_fields == "flag:bool"
         assert args.force is True
-        assert args.list_models is True
+        assert not hasattr(args, "list_models")
 
     def test_help_uses_compact_flags(self, capsys):
         """Help text should not duplicate metavar values in option listing."""
@@ -173,19 +157,6 @@ class TestParseArguments:
         assert "--input INPUT, -i INPUT" not in options_text
         # Short flags should appear before long flags
         assert options_text.index("-h, --help") < options_text.index("-i, --input")
-
-
-class TestListSupportedModels:
-    """Test list supported models function."""
-
-    def test_list_supported_models_output(self, capsys):
-        """Test that list_supported_models prints model information."""
-        list_supported_models()
-
-        captured = capsys.readouterr()
-
-        # Check that output contains expected model ids
-        assert "gemini/gemini-2.5-flash-lite" in captured.out
 
 
 class TestPromptInput:
@@ -231,18 +202,6 @@ class TestPreviewRowResolution:
 
 class TestMainExecution:
     """Test main function execution flow."""
-
-    def test_main_exits_with_list_flag(self, capsys):
-        """Test that --list exits after printing."""
-        test_args = ["pplyz", "--list"]
-
-        with patch.object(sys, "argv", test_args):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-
-            assert exc_info.value.code == 0
-            captured = capsys.readouterr()
-            assert "gemini/gemini-2.5-flash-lite" in captured.out
 
     def test_main_requires_input_and_columns(self, capsys):
         """Test that main requires INPUT and --input columns without --list."""
