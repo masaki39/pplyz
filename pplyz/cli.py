@@ -134,14 +134,6 @@ def parse_arguments() -> argparse.Namespace:
         help="List supported models and exit",
     )
 
-    parser.add_argument(
-        "--prompt",
-        "-P",
-        type=str,
-        dest="prompt",
-        help="Task description for non-interactive mode (skips prompt input)",
-    )
-
     def _colorize_help(text: str) -> str:
         """Apply light ANSI colors to section headers when TTY."""
         if not sys.stdout.isatty():
@@ -312,8 +304,8 @@ def main() -> None:
         print(f"Error: Input file must have a .csv extension: {input_path}")
         sys.exit(1)
 
-    # Get user prompt (argument takes priority, else interactive)
-    prompt = args.prompt or get_user_prompt()
+    # Get user prompt interactively
+    prompt = get_user_prompt()
 
     # Create response model from the requested output schema when provided
     response_model = None

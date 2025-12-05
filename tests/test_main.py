@@ -113,24 +113,6 @@ class TestParseArguments:
 
         assert args.list_models is True
 
-    def test_parse_with_prompt_option(self):
-        """Prompt argument should be captured when provided."""
-        test_args = [
-            "pplyz",
-            "test.csv",
-            "--input",
-            "col1",
-            "--output",
-            "flag:bool",
-            "--prompt",
-            "Do something",
-        ]
-
-        with patch.object(sys, "argv", test_args):
-            args = parse_arguments()
-
-        assert args.prompt == "Do something"
-
     def test_parse_positional_input(self):
         """Positional INPUT argument should populate input_path."""
         test_args = [
