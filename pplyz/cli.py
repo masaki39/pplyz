@@ -20,6 +20,7 @@ from pplyz.llm_client import LLMClient
 from pplyz.processor import CSVProcessor
 from pplyz.schemas import create_output_model_from_string
 from pplyz.settings import determine_config_dir, load_runtime_configuration
+from pplyz.utils import color_text
 
 DOCS_URL = "https://github.com/masaki39/pplyz#readme"
 
@@ -140,6 +141,26 @@ def parse_arguments() -> argparse.Namespace:
         dest="prompt",
         help="Task description for non-interactive mode (skips prompt input)",
     )
+
+    def _colorize_help(text: str) -> str:
+        """Apply light ANSI colors to section headers when TTY."""
+        if not sys.stdout.isatty():
+            return text
+        replacements = {
+            "usage:": color_text("usage:", "yellow"),
+            "positional arguments:": color_text("positional arguments:", "cyan"),
+            "options:": color_text("options:", "cyan"),
+        }
+        for key, val in replacements.items():
+            text = text.replace(key, val)
+        return text
+
+    def _print_help(file=None):  # type: ignore[override]
+        text = parser.format_help()
+        target = sys.stdout if file is None else file
+        parser._print_message(_colorize_help(text), target)
+
+    parser.print_help = _print_help  # type: ignore[attr-defined]
 
     return parser.parse_args()
 
