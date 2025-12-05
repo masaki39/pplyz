@@ -48,6 +48,12 @@ class LLMClient:
         # Determine provider from model name
         self.provider = self._detect_provider(self.model_name)
 
+        # Silence noisy LiteLLM info logs for end users
+        for logger_name in ("litellm", "LiteLLM"):
+            litellm_logger = logging.getLogger(logger_name)
+            litellm_logger.setLevel(logging.ERROR)
+            litellm_logger.propagate = False
+
         # Set up API key if provided
         if api_key:
             self._set_api_key(api_key)
