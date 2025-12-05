@@ -48,18 +48,8 @@ class LLMClient:
         # Determine provider from model name
         self.provider = self._detect_provider(self.model_name)
 
-        # Silence noisy LiteLLM info logs for end users
-        for logger_name in ("litellm", "LiteLLM"):
-            litellm_logger = logging.getLogger(logger_name)
-            litellm_logger.setLevel(logging.ERROR)
-            litellm_logger.propagate = False
-
-        # Set up API key if provided
-        if api_key:
-            self._set_api_key(api_key)
-        else:
-            # Verify that appropriate env var is set
-            self._verify_api_key()
+        self._silence_litellm_logs()
+        self._ensure_api_key(api_key)
 
         # Configure LiteLLM
         litellm.drop_params = True  # Drop unsupported params instead of erroring
@@ -70,15 +60,7 @@ class LLMClient:
         self.supports_schema = supports_response_schema(self.model_name)
 
     def _detect_provider(self, model_name: str) -> str:
-        """Detect the provider from the model name.
-
-        Args:
-            model_name: The model name.
-
-        Returns:
-            The provider name (e.g., "gemini", "openai", "anthropic").
-        """
-        # Try LiteLLM's provider detection first
+        """Detect the provider from the model name."""
         try:
             _, provider, _, custom_provider = litellm.get_llm_provider(model_name)
             if provider:
@@ -96,16 +78,15 @@ class LLMClient:
 
         if model_name.startswith("gemini/"):
             return "gemini"
-        elif model_name.startswith("gpt-") or model_name.startswith("openai/"):
+        if model_name.startswith("gpt-") or model_name.startswith("openai/"):
             return "openai"
-        elif model_name.startswith("claude-") or model_name.startswith("anthropic/"):
+        if model_name.startswith("claude-") or model_name.startswith("anthropic/"):
             return "anthropic"
-        else:
-            # Default to checking if it's a known prefix
-            for provider in API_KEY_ENV_VARS.keys():
-                if model_name.startswith(f"{provider}/"):
-                    return provider
-            return "unknown"
+
+        for provider in API_KEY_ENV_VARS.keys():
+            if model_name.startswith(f"{provider}/"):
+                return provider
+        return "unknown"
 
     def _set_api_key(self, api_key: str) -> None:
         """Set the API key for the detected provider.
@@ -123,17 +104,13 @@ class LLMClient:
             os.environ[target_var] = api_key
 
     def _verify_api_key(self) -> None:
-        """Verify that the required API key is set in environment.
-
-        Raises:
-            ValueError: If the required API key is not found.
-        """
+        """Verify that the required API key is set in environment."""
         env_vars = API_KEY_ENV_VARS.get(self.provider)
         if not env_vars:
-            # Unknown provider, log warning
             logger.warning(
-                f"Unknown provider '{self.provider}' for model '{self.model_name}'. "
-                f"API key verification skipped. Ensure appropriate environment variables are set."
+                "Unknown provider '%s' for model '%s'. API key verification skipped.",
+                self.provider,
+                self.model_name,
             )
             return
 
@@ -148,6 +125,20 @@ class LLMClient:
                 f"Example: export {env_vars[0]}='your-api-key-here'"
             )
 
+    def _ensure_api_key(self, api_key: str | None) -> None:
+        """Set or verify API key presence."""
+        if api_key:
+            self._set_api_key(api_key)
+        else:
+            self._verify_api_key()
+
+    def _silence_litellm_logs(self) -> None:
+        """Reduce LiteLLM logging noise for end users."""
+        for logger_name in ("litellm", "LiteLLM"):
+            litellm_logger = logging.getLogger(logger_name)
+            litellm_logger.setLevel(logging.ERROR)
+            litellm_logger.propagate = False
+
     def _rate_limit_delay(self) -> None:
         """Implement rate limiting between requests."""
         elapsed = time.time() - self.last_request_time
@@ -155,80 +146,34 @@ class LLMClient:
             time.sleep(REQUEST_DELAY - elapsed)
         self.last_request_time = time.time()
 
-    def _generate_with_retry(
-        self, messages: list, response_model: Optional[Type[BaseModel]] = None
-    ) -> str:
-        """Generate content with automatic retry logic.
+    def _build_completion_params(
+        self, messages: list, response_model: Optional[Type[BaseModel]]
+    ) -> dict:
+        """Prepare completion parameters with schema settings."""
+        completion_params = {
+            "model": self.model_name,
+            "messages": messages,
+        }
 
-        Args:
-            messages: List of message dictionaries for the chat completion.
-            response_model: Optional Pydantic model for structured output.
-
-        Returns:
-            The generated text response.
-
-        Raises:
-            Various LiteLLM exceptions if retries are exhausted.
-        """
-        attempt = 0
-
-        while attempt < MAX_RETRIES:
-            self._rate_limit_delay()
-
-            completion_params = {
-                "model": self.model_name,
-                "messages": messages,
-            }
-
-            if response_model is not None:
-                if self.supports_schema:
-                    completion_params["response_format"] = response_model
-                else:
-                    completion_params["response_format"] = {"type": "json_object"}
-            elif USE_JSON_MODE:
+        if response_model is not None:
+            if self.supports_schema:
+                completion_params["response_format"] = response_model
+            else:
                 completion_params["response_format"] = {"type": "json_object"}
+        elif USE_JSON_MODE:
+            completion_params["response_format"] = {"type": "json_object"}
 
-            try:
-                response = completion(**completion_params)
-                return response.choices[0].message.content
+        return completion_params
 
-            except (RateLimitError, ServiceUnavailableError, APIError, Timeout) as exc:
-                if attempt >= len(RETRY_BACKOFF_SCHEDULE):
-                    raise
-
-                delay = RETRY_BACKOFF_SCHEDULE[attempt]
-                logger.warning(
-                    f"LLM request failed (attempt {attempt + 1}/{MAX_RETRIES}): "
-                    f"{format_error_message(exc, limit=300)}. Retrying in {delay:.1f}s..."
-                )
-                time.sleep(delay)
-                attempt += 1
-
-        raise RuntimeError("LLM retry logic exhausted unexpectedly")
-
-    def generate_structured_output(
+    def _build_messages(
         self,
         prompt: str,
         input_data: Dict[str, Any],
-        response_model: Optional[Type[BaseModel]] = None,
-    ) -> Dict[str, Any]:
-        """Generate structured output from input data.
-
-        Args:
-            prompt: The user-provided prompt describing the task.
-            input_data: Dictionary containing the selected column data.
-            response_model: Optional Pydantic model defining the output schema.
-
-        Returns:
-            Dictionary containing the generated structured output.
-
-        Raises:
-            ValueError: If the response cannot be parsed as JSON or validated.
-        """
-        # Construct the messages for chat completion
+        response_model: Optional[Type[BaseModel]],
+    ) -> list[dict]:
+        """Construct system/user messages for the LLM."""
         data_str = json.dumps(input_data, ensure_ascii=False, indent=2)
 
-        # Build system message based on whether we have a schema
         if response_model is not None:
             schema_fields = list(response_model.model_fields.keys())
             system_message = (
@@ -257,47 +202,94 @@ Instructions:
 
 Output (JSON only):"""
 
-        messages = [
+        return [
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ]
 
+    def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
+        """Normalize and parse the JSON returned by the LLM."""
+        cleaned = response_text.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        parsed = json.loads(cleaned)
+        if not isinstance(parsed, dict):
+            raise ValueError("Response must be a JSON object (dictionary)")
+        return parsed
+
+    def _validate_response(
+        self, parsed: Dict[str, Any], response_model: Type[BaseModel]
+    ) -> Dict[str, Any]:
+        """Validate parsed JSON against the provided schema."""
+        validated = response_model(**parsed)
+        return validated.model_dump()
+
+    def _generate_with_retry(
+        self, messages: list, response_model: Optional[Type[BaseModel]] = None
+    ) -> str:
+        """Generate content with automatic retry logic."""
+        attempt = 0
+
+        while attempt < MAX_RETRIES:
+            self._rate_limit_delay()
+            completion_params = self._build_completion_params(messages, response_model)
+
+            try:
+                response = completion(**completion_params)
+                return response.choices[0].message.content
+            except (RateLimitError, ServiceUnavailableError, APIError, Timeout) as exc:
+                if attempt >= len(RETRY_BACKOFF_SCHEDULE):
+                    raise
+
+                delay = RETRY_BACKOFF_SCHEDULE[attempt]
+                logger.warning(
+                    "LLM request failed (attempt %d/%d): %s. Retrying in %.1fs...",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    format_error_message(exc, limit=300),
+                    delay,
+                )
+                time.sleep(delay)
+                attempt += 1
+
+        raise RuntimeError("LLM retry logic exhausted unexpectedly")
+
+    def generate_structured_output(
+        self,
+        prompt: str,
+        input_data: Dict[str, Any],
+        response_model: Optional[Type[BaseModel]] = None,
+    ) -> Dict[str, Any]:
+        """Generate structured output from input data.
+
+        Args:
+            prompt: The user-provided prompt describing the task.
+            input_data: Dictionary containing the selected column data.
+            response_model: Optional Pydantic model defining the output schema.
+
+        Returns:
+            Dictionary containing the generated structured output.
+
+        Raises:
+            ValueError: If the response cannot be parsed as JSON or validated.
+        """
+        messages = self._build_messages(prompt, input_data, response_model)
         try:
             response_text = self._generate_with_retry(messages, response_model)
-
-            # Clean up response text (remove markdown code blocks if present)
-            response_text = response_text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            elif response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-
-            # Parse JSON response
-            result = json.loads(response_text)
-
-            if not isinstance(result, dict):
-                raise ValueError("Response must be a JSON object (dictionary)")
-
-            # Validate against Pydantic model if provided
+            parsed = self._parse_json_response(response_text)
             if response_model is not None:
-                try:
-                    validated = response_model(**result)
-                    # Convert back to dict for consistency
-                    return validated.model_dump()
-                except Exception as e:
-                    raise ValueError(
-                        f"Response does not match expected schema: {e}"
-                    ) from e
-
-            return result
-
-        except json.JSONDecodeError as e:
+                return self._validate_response(parsed, response_model)
+            return parsed
+        except json.JSONDecodeError as exc:
             raise ValueError(
-                f"Failed to parse LLM response as JSON: {e}\n"
+                f"Failed to parse LLM response as JSON: {exc}\n"
                 f"Response was: {response_text[:200]}..."
-            ) from e
-        except Exception as e:
-            raise ValueError(f"Error generating structured output: {e}") from e
+            ) from exc
+        except Exception as exc:
+            raise ValueError(f"Error generating structured output: {exc}") from exc
