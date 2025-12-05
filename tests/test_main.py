@@ -202,8 +202,7 @@ class TestListSupportedModels:
 
         captured = capsys.readouterr()
 
-        # Check that output contains expected content
-        assert "SUPPORTED MODELS" in captured.out
+        # Check that output contains expected model ids
         assert "gemini/gemini-2.5-flash-lite" in captured.out
 
 
@@ -261,7 +260,7 @@ class TestMainExecution:
 
             assert exc_info.value.code == 0
             captured = capsys.readouterr()
-            assert "SUPPORTED MODELS" in captured.out
+            assert "gemini/gemini-2.5-flash-lite" in captured.out
 
     def test_main_requires_input_and_columns(self, capsys):
         """Test that main requires INPUT and --input columns without --list."""

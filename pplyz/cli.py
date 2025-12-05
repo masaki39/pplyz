@@ -242,18 +242,8 @@ def _build_prompt_session():
 
 def list_supported_models() -> None:
     """Print list of supported models."""
-    print("\n" + "=" * 70)
-    print("SUPPORTED MODELS")
-    print("=" * 70)
-    print("\nNote: LiteLLM supports many more models. These are common examples.\n")
-
-    for model_name, description in SUPPORTED_MODELS.items():
-        print(f"  {model_name}")
-        print(f"    {description}\n")
-
-    print("=" * 70)
-    print("\nFor the full list, visit: https://docs.litellm.ai/docs/providers")
-    print()
+    print("\n".join(SUPPORTED_MODELS.keys()))
+    print("\nMore providers: https://docs.litellm.ai/docs/providers")
 
 
 def main() -> None:

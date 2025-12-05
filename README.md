@@ -175,7 +175,4 @@ uvx pplyz \
 - Use `--preview` before long or expensive CSV batches to validate prompts and model choice.
 - Resume mode is on by default; rows with existing output columns are skipped. Use `--force` to recompute everything.
 - Dynamic (schema-less) mode is not supported; always provide `--output` (or set `[pplyz].default_output`).
-
-## Support & License
-
-Issues and PRs are welcome. Licensed under MIT — see `LICENSE`.
+- CSV encoding is UTF-8 only; convert input files beforehand if they use another encoding.
