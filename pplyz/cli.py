@@ -28,11 +28,13 @@ try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
     from prompt_toolkit.history import FileHistory, InMemoryHistory
+    from prompt_toolkit.key_binding import KeyBindings
 except ImportError:  # pragma: no cover - optional dependency
     PromptSession = None
     AutoSuggestFromHistory = None
     FileHistory = None
     InMemoryHistory = None
+    KeyBindings = None
 
 # Configure logging
 logging.basicConfig(
@@ -229,12 +231,29 @@ def _build_prompt_session():
     except OSError:
         history = InMemoryHistory()
 
-    # Enable tab completion using history suggestions
+    kb = KeyBindings()
+
+    @kb.add("tab")
+    def _(event):  # type: ignore[override]
+        """Accept autosuggest with Tab when available."""
+        buf = event.app.current_buffer
+        if buf.suggestion:
+            buf.insert_text(buf.suggestion.text)
+        else:
+            buf.insert_text("\t")
+
+    @kb.add("right")
+    def _(event):  # type: ignore[override]
+        """Disable accepting autosuggest with Right; just move cursor."""
+        event.app.current_buffer.cursor_right()
+
+    # Enable tab acceptance of history suggestions
     return PromptSession(
         history=history,
         auto_suggest=auto_suggest,
         complete_while_typing=True,
         enable_history_search=True,
+        key_bindings=kb,
     )
 
 
