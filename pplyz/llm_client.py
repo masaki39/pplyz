@@ -158,9 +158,7 @@ class LLMClient:
         if response_model is not None:
             if self.supports_schema:
                 completion_params["response_format"] = response_model
-            else:
-                completion_params["response_format"] = {"type": "json_object"}
-        elif USE_JSON_MODE:
+        elif USE_JSON_MODE and self.supports_schema:
             completion_params["response_format"] = {"type": "json_object"}
 
         return completion_params

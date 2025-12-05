@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from time import time
 from typing import List, Optional, Type
 
 import pandas as pd
@@ -127,6 +128,7 @@ class CSVProcessor:
         processed = 0
         skipped = 0
         total_rows = len(df)
+        start_time = time()
 
         for idx, row in df.iterrows():
             row_num = idx + 1
@@ -203,15 +205,18 @@ class CSVProcessor:
         logger.info("✓ Saved %d rows", len(output_df))
 
         # Print summary
-        separator = "=" * 50
+        separator = "=" * 56
         logger.info(separator)
+
+        duration = time() - start_time
         logger.info(
-            "Summary | total=%d processed=%d skipped=%d success=%d errors=%d",
+            "Summary | total=%d processed=%d skipped=%d success=%d errors=%d | duration=%.1fs",
             len(df),
             processed,
             skipped,
             processed - len(errors),
             len(errors),
+            duration,
         )
 
         if errors:

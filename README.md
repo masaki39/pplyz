@@ -25,9 +25,8 @@ uvx pplyz \
 ```
 
 - `--preview` dry-runs a handful of rows (set `[pplyz].preview_rows` to change how many rows are shown).
-- `--list` prints bundled prompt templates and exits.
 - `--model provider/name` overrides the LiteLLM model (e.g., `groq/llama-3.1-8b-instant`).
-- `--prompt "..."` lets you skip interactive prompt entry (default is interactive with history stored under `~/.config/pplyz/`).
+- Prompts are entered interactively at runtime (history is stored under `~/.config/pplyz/`). For non-interactive runs, provide the prompt when the CLI asks for it.
 
 _pplyz overwrites the input CSV; copy it first if you need to keep the original file._
 
@@ -43,8 +42,6 @@ Run `uvx pplyz --help` for every flag.
 | `-p, --preview` | Process a few rows and show would-be output without writing (row count configured via `[pplyz].preview_rows`). | No |
 | `-m, --model provider/name` | LiteLLM model (default `gemini/gemini-2.5-flash-lite`). | No |
 | `-f, --force` | Disable resume mode; always recompute rows and overwrite existing output. | No |
-| `-l, --list` | List supported templates/models and exit. | No |
-| `-P, --prompt "task description"` | Provide the LLM task non-interactively (otherwise you'll be prompted). | No |
 
 ## Configuration
 
@@ -130,7 +127,7 @@ Pulled from `pplyz/config.py` for quick reference—LiteLLM supports many more.
 | `databricks/mixtral-8x7b-instruct` | Databricks MosaicML endpoint. |
 | `sagemaker/meta-textgeneration-llama-3-8b` | AWS SageMaker endpoint. |
 
-Use `uvx pplyz --list` to see the live list bundled with your version.
+See `pplyz/config.py` for the bundled list in this release.
 
 ## Examples
 
@@ -171,6 +168,7 @@ uvx pplyz \
 ## Tips
 
 - Boolean output columns keep binary classifiers deterministic (`true`/`false`).
+- Some models do not support JSON mode; pplyz only sends `response_format` to models that advertise support. Explicitly state “return valid JSON only” in your prompt to keep outputs consistent.
 - Keep prompts short and explicit about the JSON schema you expect to avoid parsing errors.
 - Use `--preview` before long or expensive CSV batches to validate prompts and model choice.
 - Resume mode is on by default; rows with existing output columns are skipped. Use `--force` to recompute everything.

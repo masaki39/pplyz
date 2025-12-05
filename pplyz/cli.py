@@ -44,6 +44,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+SECTION_LINE = "=" * 56
+
 
 class CompactHelpFormatter(argparse.RawDescriptionHelpFormatter):
     """Help formatter without metavar duplication in option listing."""
@@ -185,9 +187,9 @@ def get_user_prompt() -> str:
     Returns:
         The user-provided prompt.
     """
-    print("\n" + "=" * 60)
-    print("LLM ANALYSER - Prompt Input")
-    print("=" * 60)
+    print("\n" + SECTION_LINE)
+    print("PPLYZ - Prompt Input")
+    print(SECTION_LINE)
     print(
         "\nPlease enter the prompt you want the LLM to run for each row.\n"
         "The LLM will receive the selected columns and generate structured output.\n"
@@ -326,20 +328,9 @@ def main() -> None:
     if resolved_fields:
         try:
             response_model = create_output_model_from_string(resolved_fields)
-            print(f"\n✓ Using output schema: {resolved_fields}")
         except Exception as e:
             print(f"Error parsing fields: {e}")
             sys.exit(1)
-
-    run_mode = "force" if args.force else "resume"
-    logger.info(
-        "Run | file=%s | model=%s | input=%s | output=%s | mode=%s",
-        input_path,
-        args.model,
-        ",".join(columns),
-        resolved_fields,
-        run_mode,
-    )
 
     # Initialize LLM client
     logger.info("Initializing LLM client (model: %s)...", args.model)
