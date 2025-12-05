@@ -4,7 +4,7 @@
 
 Source & issues: https://github.com/masaki39/pplyz
 
-Minimal CSV→LLM→CSV transformer powered by LiteLLM and uv. 日本語はこちら → [README.ja.md](README.ja.md)
+Minimal CSV→LLM→CSV transformer powered by LiteLLM and uv.
 
 ## Requirements
 

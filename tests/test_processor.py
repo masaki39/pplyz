@@ -156,6 +156,39 @@ class TestProcessCSV:
         assert output_df.columns.tolist().count("score") == 1
         assert list(output_df["category"]) == ["first", "first", "first"]
 
+    def test_process_csv_resume_infers_dynamic_output_columns(
+        self, sample_csv_file, tmp_path, mock_env_vars
+    ):
+        """Resume mode should infer output columns when schema is dynamic."""
+        from pplyz.llm_client import LLMClient
+
+        client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
+        processor = CSVProcessor(llm_client=client)
+        output_path = tmp_path / "output.csv"
+
+        # First run: write dynamic output columns
+        with patch.object(client, "generate_structured_output") as mock_generate:
+            mock_generate.return_value = {"category": "initial", "notes": "ok"}
+            processor.process_csv(
+                input_path=sample_csv_file,
+                output_path=output_path,
+                columns=["title"],
+                prompt="Test",
+            )
+
+        # Resume should detect existing output columns and skip reprocessing
+        with patch.object(client, "generate_structured_output") as resume_generate:
+            processor.process_csv(
+                input_path=sample_csv_file,
+                output_path=output_path,
+                columns=["title"],
+                prompt="Test",
+            )
+            assert resume_generate.call_count == 0
+
+        output_df = pd.read_csv(output_path)
+        assert list(output_df["category"]) == ["initial", "initial", "initial"]
+
     def test_process_csv_retries_failed_rows(
         self, sample_csv_file, tmp_path, mock_env_vars
     ):

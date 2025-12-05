@@ -19,7 +19,7 @@ from pplyz.config import (
 from pplyz.llm_client import LLMClient
 from pplyz.processor import CSVProcessor
 from pplyz.schemas import create_output_model_from_string
-from pplyz.settings import load_runtime_configuration
+from pplyz.settings import determine_config_dir, load_runtime_configuration
 
 DOCS_URL = "https://github.com/masaki39/pplyz#readme"
 
@@ -134,6 +134,14 @@ def parse_arguments() -> argparse.Namespace:
         help="List supported models and exit",
     )
 
+    parser.add_argument(
+        "--prompt",
+        "-P",
+        type=str,
+        dest="prompt",
+        help="Task description for non-interactive mode (skips prompt input)",
+    )
+
     return parser.parse_args()
 
 
@@ -202,8 +210,9 @@ def _build_prompt_session():
     history = InMemoryHistory()
 
     try:
-        history_path = Path.home() / ".pplyz_prompt_history"
-        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_dir = determine_config_dir()
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_path = history_dir / "prompt_history"
         history = FileHistory(str(history_path))
     except OSError:
         history = InMemoryHistory()
@@ -293,8 +302,8 @@ def main() -> None:
         print(f"Error: Input file must have a .csv extension: {input_path}")
         sys.exit(1)
 
-    # Get user prompt interactively
-    prompt = get_user_prompt()
+    # Get user prompt (argument takes priority, else interactive)
+    prompt = args.prompt or get_user_prompt()
 
     # Create response model from the requested output schema when provided
     response_model = None

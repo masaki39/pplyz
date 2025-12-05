@@ -86,6 +86,12 @@ class CSVProcessor:
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
+        # Snapshot of the original input columns (best-effort; may equal output when in-place)
+        try:
+            original_input_columns = set(pd.read_csv(input_path).columns)
+        except Exception:
+            original_input_columns = set()
+
         # Load CSV - use output if it exists and resume is True
         if output_path.exists() and resume:
             logger.info("Resume enabled -> loading existing output: %s", output_path)
@@ -108,8 +114,21 @@ class CSVProcessor:
         if response_model is not None:
             new_column_names = get_field_names(response_model)
         else:
-            # Will be determined dynamically from first result
-            new_column_names = []
+            # Resume mode with dynamic schema: try to infer output columns from existing file
+            inferred_outputs = [
+                col
+                for col in df.columns
+                if col not in columns and col not in original_input_columns
+            ]
+            if inferred_outputs:
+                new_column_names = inferred_outputs
+                logger.info(
+                    "Resume enabled -> inferred existing output columns: %s",
+                    ",".join(new_column_names),
+                )
+            else:
+                # Will be determined dynamically from first result
+                new_column_names = []
 
         # Process each row
         schema_info = (
