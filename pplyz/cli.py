@@ -229,7 +229,13 @@ def _build_prompt_session():
     except OSError:
         history = InMemoryHistory()
 
-    return PromptSession(history=history, auto_suggest=auto_suggest)
+    # Enable tab completion using history suggestions
+    return PromptSession(
+        history=history,
+        auto_suggest=auto_suggest,
+        complete_while_typing=True,
+        enable_history_search=True,
+    )
 
 
 def list_supported_models() -> None:
