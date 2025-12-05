@@ -39,7 +39,7 @@ Run `uvx pplyz --help` for every flag.
 | --- | --- | --- |
 | `INPUT` (positional) | Input CSV path. | Yes |
 | `-i, --input title,abstract` | Comma-separated source columns passed to the LLM. | Yes (unless `[pplyz].default_input` is set) |
-| `-o, --output 'score:int,notes:str'` | Output schema. Types: `bool`, `int`, `float`, `str` (missing `:type` defaults to `str`). | Yes (unless `[pplyz].default_output` is set) |
+| `-o, --output 'score:int,notes:str'` | Output column schema. Types: `bool`, `int`, `float`, `str` (missing `:type` defaults to `str`). | Yes (unless `[pplyz].default_output` is set) |
 | `-p, --preview` | Process a few rows and show would-be output without writing (row count configured via `[pplyz].preview_rows`). | No |
 | `-m, --model provider/name` | LiteLLM model (default `gemini/gemini-2.5-flash-lite`). | No |
 | `-f, --force` | Disable resume mode; always recompute rows and overwrite existing output. | No |
@@ -65,7 +65,7 @@ Run `uvx pplyz --help` for every flag.
    [pplyz]
    default_model = "gpt-4o-mini"
    default_input = "title,abstract"
-   default_output = "is_relevant:bool,summary:str"
+   default_output = "relevant:bool,summary:str"
    ```
 
 3. At runtime pplyz loads settings in this order: environment variables → config file. The default path is `~/.config/pplyz/config.toml` (or `%APPDATA%\\pplyz\\config.toml` on Windows; if `XDG_CONFIG_HOME` is set, it uses that). To keep configs elsewhere, set `PPLYZ_CONFIG_DIR=/path/to/dir` and place `config.toml` there.

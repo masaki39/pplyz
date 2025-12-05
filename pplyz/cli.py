@@ -82,7 +82,7 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     output_help = (
-        'Output fields definition (e.g., "is_relevant:bool,summary:str"). '
+        'Output column definitions (e.g., "relevant:bool,summary:str"). '
         "Supported types: bool, int, float, str."
     )
 
