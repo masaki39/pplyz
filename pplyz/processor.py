@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from .config import DEFAULT_PREVIEW_ROWS
 from .llm_client import LLMClient
 from .schemas import get_field_names
-from .utils import format_error_message
+from .utils import color_text, format_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ class CSVProcessor:
                 and new_column_names
                 and not self._should_process_row(row, new_column_names)
             ):
-                logger.info("%s skip (already processed)", prefix)
+                logger.info(color_text(f"{prefix} → skip (already processed)", "cyan"))
                 # Keep existing data
                 existing_data = {
                     col: row[col] if col in row.index else None
@@ -160,10 +160,10 @@ class CSVProcessor:
 
                 results.append(output)
                 processed += 1
-                logger.info("%s ✓ success", prefix)
+                logger.info(color_text(f"{prefix} ✓ success", "green"))
 
             except Exception as e:
-                logger.error("%s ✗ %s", prefix, format_error_message(e))
+                logger.error(color_text(f"{prefix} ✗ {format_error_message(e)}", "red"))
                 # Add empty result to maintain row alignment
                 results.append({})
                 processed += 1
@@ -259,12 +259,14 @@ class CSVProcessor:
                     prompt, input_data, response_model
                 )
                 results[position] = output
-                logger.info("Row %d ✓ recovered on retry", row_num)
+                logger.info(color_text(f"Row {row_num} ✓ recovered on retry", "green"))
             except Exception as retry_error:
                 formatted = format_error_message(retry_error)
                 failure["error"] = formatted
                 remaining_failures.append(failure)
-                logger.error("Row %d ✗ retry failed: %s", row_num, formatted)
+                logger.error(
+                    color_text(f"Row {row_num} ✗ retry failed: {formatted}", "red")
+                )
 
         if remaining_failures:
             logger.warning(
