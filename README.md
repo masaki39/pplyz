@@ -27,6 +27,7 @@ uvx pplyz \
 - `--preview` dry-runs a handful of rows (set `[pplyz].preview_rows` to change how many rows are shown).
 - `--list` prints bundled prompt templates and exits.
 - `--model provider/name` overrides the LiteLLM model (e.g., `groq/llama-3.1-8b-instant`).
+- `--prompt "..."` lets you skip interactive prompt entry (default is interactive with history stored under `~/.config/pplyz/`).
 
 _pplyz overwrites the input CSV; copy it first if you need to keep the original file._
 
@@ -43,6 +44,7 @@ Run `uvx pplyz --help` for every flag.
 | `-m, --model provider/name` | LiteLLM model (default `gemini/gemini-2.5-flash-lite`). | No |
 | `-f, --force` | Disable resume mode; always recompute rows and overwrite existing output. | No |
 | `-l, --list` | List supported templates/models and exit. | No |
+| `-P, --prompt "task description"` | Provide the LLM task non-interactively (otherwise you'll be prompted). | No |
 
 ## Configuration
 
@@ -171,6 +173,7 @@ uvx pplyz \
 - Boolean output columns keep binary classifiers deterministic (`true`/`false`).
 - Keep prompts short and explicit about the JSON schema you expect to avoid parsing errors.
 - Use `--preview` before long or expensive CSV batches to validate prompts and model choice.
+- Resume mode is on by default; rows with existing output columns are skipped. Use `--force` to recompute everything.
 
 ## Support & License
 
