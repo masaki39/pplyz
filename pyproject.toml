@@ -1,6 +1,6 @@
 [project]
 name = "pplyz"
-version = "0.1.1"
+version = "0.1.2"
 description = "LLM-powered CSV data analyzer with structured output generation using LiteLLM (short for LLM Analyser)"
 readme = "README.md"
 requires-python = ">=3.12"
