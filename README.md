@@ -104,30 +104,7 @@ Set these inside the `[env]` table of your `config.toml`:
 
 ## Supported models
 
-Pulled from `pplyz/config.py` for quick reference—LiteLLM supports many more.
-
-| Model id | Notes |
-| --- | --- |
-| `gemini/gemini-2.5-flash-lite` | Default, fast + cheap. |
-| `gemini/gemini-1.5-pro` | Higher quality Gemini. |
-| `gpt-4o` | OpenAI flagship. |
-| `gpt-4o-mini` | Cheaper GPT-4o Mini. |
-| `claude-3-5-sonnet-20241022` | Balanced Anthropic model. |
-| `claude-3-haiku-20240307` | Fast Anthropic Haiku. |
-| `groq/llama-3.1-8b-instant` | Ultra-low latency on Groq. |
-| `mistral/mistral-large-latest` | Enterprise Mistral. |
-| `cohere/command-r-plus` | Tool-friendly Cohere model. |
-| `replicate/meta/meta-llama-3-8b-instruct` | Replicate-hosted Llama 3 8B. |
-| `huggingface/meta-llama/Meta-Llama-3-8B-Instruct` | Hugging Face endpoint. |
-| `xai/grok-beta` | xAI Grok Beta. |
-| `together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo` | Together AI aggregator. |
-| `perplexity/llama-3.1-sonar-small-128k-online` | Web-augmented Perplexity Sonar. |
-| `deepseek/deepseek-chat` | DeepSeek Chat. |
-| `azure/gpt-4o` | Azure OpenAI variant. |
-| `databricks/mixtral-8x7b-instruct` | Databricks MosaicML endpoint. |
-| `sagemaker/meta-textgeneration-llama-3-8b` | AWS SageMaker endpoint. |
-
-See `pplyz/config.py` for the bundled list in this release.
+For the latest list of supported models, see the LiteLLM provider docs: https://docs.litellm.ai/docs/providers
 
 ## Examples
 

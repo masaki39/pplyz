@@ -44,19 +44,6 @@ class TestConfig:
         assert "GROQ_API_KEY" in config.API_KEY_ENV_VARS["groq"]
         assert "MISTRAL_API_KEY" in config.API_KEY_ENV_VARS["mistral"]
 
-    def test_supported_models(self):
-        """Test supported models dictionary."""
-        assert isinstance(config.SUPPORTED_MODELS, dict)
-        assert len(config.SUPPORTED_MODELS) > 0
-
-        # Check some key models exist
-        assert "gemini/gemini-2.5-flash-lite" in config.SUPPORTED_MODELS
-        assert "gpt-4o" in config.SUPPORTED_MODELS
-        assert "claude-3-5-sonnet-20241022" in config.SUPPORTED_MODELS
-        assert "groq/llama-3.1-8b-instant" in config.SUPPORTED_MODELS
-        assert "mistral/mistral-large-latest" in config.SUPPORTED_MODELS
-        assert "cohere/command-r-plus" in config.SUPPORTED_MODELS
-
     def test_retry_config(self):
         """Test retry configuration values."""
         assert config.RETRY_BACKOFF_SCHEDULE == [1, 2, 3, 5, 10, 10, 10, 10, 10]

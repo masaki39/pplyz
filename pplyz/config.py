@@ -49,52 +49,6 @@ API_KEY_ENV_VARS = {
     "cloudflare": ["CLOUDFLARE_API_KEY"],
 }
 
-# Supported models (examples - LiteLLM supports many more)
-SUPPORTED_MODELS = {
-    # Gemini (Google)
-    "gemini/gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite (default, cost-effective)",
-    "gemini/gemini-2.0-flash-lite": "Gemini 2.0 Flash Lite (fast)",
-    "gemini/gemini-1.5-pro": "Gemini 1.5 Pro (high quality)",
-    # OpenAI
-    "gpt-4o": "GPT-4o (flagship)",
-    "gpt-4o-mini": "GPT-4o Mini (fast + cheap)",
-    # Anthropic
-    "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet (balanced)",
-    "claude-3-haiku-20240307": "Claude 3 Haiku (fast)",
-    # Groq
-    "groq/llama-3.1-8b-instant": "Groq Llama 3.1 8B Instant (ultra-low latency)",
-    # Mistral
-    "mistral/mistral-large-latest": "Mistral Large Latest (enterprise-ready)",
-    # Cohere
-    "cohere/command-r-plus": "Cohere Command R+ (tool + reasoning)",
-    # Together AI
-    "together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo": "Together Meta-Llama 3.1 70B (API aggregators)",
-    # Replicate
-    "replicate/meta/meta-llama-3-8b-instruct": "Replicate Meta Llama 3 8B Instruct",
-    # Hugging Face Inference Endpoints
-    "huggingface/meta-llama/Meta-Llama-3-8B-Instruct": "Hugging Face Inference: Meta-Llama-3-8B-Instruct",
-    # xAI
-    "xai/grok-beta": "xAI Grok Beta",
-    # Amazon Bedrock
-    "bedrock/anthropic.claude-3-5-haiku-20241022-v1:0": "Amazon Bedrock Claude 3.5 Haiku",
-    # Google Vertex AI
-    "vertex_ai/gemini-1.5-pro-preview-0409": "Vertex AI Gemini 1.5 Pro Preview",
-    # IBM watsonx
-    "watsonx/granite-3-8b-instruct": "IBM watsonx Granite 3 8B Instruct",
-    # Perplexity
-    "perplexity/llama-3.1-sonar-small-128k-online": "Perplexity Sonar Small (web-augmented)",
-    # DeepSeek
-    "deepseek/deepseek-chat": "DeepSeek Chat",
-    # OpenRouter
-    "openrouter/meta-llama/Meta-Llama-3-70B-Instruct": "OpenRouter Meta-Llama 3 70B Instruct",
-    # Azure OpenAI
-    "azure/gpt-4o": "Azure OpenAI GPT-4o (enterprise)",
-    # Databricks
-    "databricks/mixtral-8x7b-instruct": "Databricks Mixtral 8x7B Instruct",
-    # AWS SageMaker
-    "sagemaker/meta-textgeneration-llama-3-8b": "SageMaker Llama 3 8B Text Generation",
-}
-
 # Retry Configuration
 RETRY_BACKOFF_SCHEDULE = [1, 2, 3, 5, 10, 10, 10, 10, 10]  # seconds
 MAX_RETRIES = len(RETRY_BACKOFF_SCHEDULE) + 1  # initial attempt + retries
