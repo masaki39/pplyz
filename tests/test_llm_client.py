@@ -4,7 +4,8 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from litellm.exceptions import RateLimitError
+from litellm.exceptions import BadRequestError, RateLimitError
+from pydantic import BaseModel
 
 from pplyz import config
 from pplyz.llm_client import LLMClient
@@ -198,3 +199,34 @@ class TestRetryLogic:
             # Should succeed after retry
             assert result == sample_llm_response
             assert mock_completion.call_count == 2
+
+    def test_fallback_when_response_format_rejected(self, mock_env_vars):
+        """BadRequest about response_format should disable schema format and retry."""
+        client = LLMClient(model_name="gemini/gemini-2.5-flash-lite")
+
+        class DummyModel(BaseModel):
+            """Simple schema for validation."""
+
+            category: str
+
+        with patch("pplyz.llm_client.completion") as mock_completion:
+            bad_request = BadRequestError(
+                message="JSON mode is not enabled for this model",
+                llm_provider="test",
+                model="test",
+            )
+            success_response = MagicMock()
+            success_response.choices = [MagicMock()]
+            success_response.choices[0].message.content = json.dumps({"category": "ok"})
+
+            mock_completion.side_effect = [bad_request, success_response]
+
+            result = client.generate_structured_output(
+                prompt="Test prompt",
+                input_data={"test": "data"},
+                response_model=DummyModel,
+            )
+
+            assert result == {"category": "ok"}
+            assert mock_completion.call_count == 2
+            assert client.supports_schema is False

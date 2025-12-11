@@ -10,6 +10,7 @@ import litellm
 from litellm import completion, supports_response_schema
 from litellm.exceptions import (
     APIError,
+    BadRequestError,
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
@@ -147,7 +148,10 @@ class LLMClient:
         self.last_request_time = time.time()
 
     def _build_completion_params(
-        self, messages: list, response_model: Optional[Type[BaseModel]]
+        self,
+        messages: list,
+        response_model: Optional[Type[BaseModel]],
+        use_schema_format: bool = True,
     ) -> dict:
         """Prepare completion parameters with schema settings."""
         completion_params = {
@@ -155,10 +159,10 @@ class LLMClient:
             "messages": messages,
         }
 
-        if response_model is not None:
+        if use_schema_format and response_model is not None:
             if self.supports_schema:
                 completion_params["response_format"] = response_model
-        elif USE_JSON_MODE and self.supports_schema:
+        elif use_schema_format and USE_JSON_MODE and self.supports_schema:
             completion_params["response_format"] = {"type": "json_object"}
 
         return completion_params
@@ -233,14 +237,27 @@ Output (JSON only):"""
     ) -> str:
         """Generate content with automatic retry logic."""
         attempt = 0
+        use_schema_format = True
 
         while attempt < MAX_RETRIES:
             self._rate_limit_delay()
-            completion_params = self._build_completion_params(messages, response_model)
+            completion_params = self._build_completion_params(
+                messages, response_model, use_schema_format
+            )
 
             try:
                 response = completion(**completion_params)
                 return response.choices[0].message.content
+            except BadRequestError as exc:
+                # Some providers report schema/JSON-mode support but reject response_format at runtime.
+                if use_schema_format and self._is_response_format_error(exc):
+                    logger.warning(
+                        "Model rejected response_format/JSON mode; retrying without schema enforcement."
+                    )
+                    self.supports_schema = False
+                    use_schema_format = False
+                    continue
+                raise
             except (RateLimitError, ServiceUnavailableError, APIError, Timeout) as exc:
                 if attempt >= len(RETRY_BACKOFF_SCHEDULE):
                     raise
@@ -257,6 +274,19 @@ Output (JSON only):"""
                 attempt += 1
 
         raise RuntimeError("LLM retry logic exhausted unexpectedly")
+
+    def _is_response_format_error(self, exc: Exception) -> bool:
+        """Detect provider errors caused by response_format/JSON mode."""
+        message = str(exc).lower()
+        return any(
+            keyword in message
+            for keyword in (
+                "response_format",
+                "json mode is not enabled",
+                "json_mode",
+                "invalid json output config",
+            )
+        )
 
     def generate_structured_output(
         self,
