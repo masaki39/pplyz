@@ -29,6 +29,13 @@ CONFIG_TOML_NAME = "config.toml"
 LOCAL_CONFIG_NAME = "pplyz.local.toml"
 PROJECT_ROOT = Path(__file__).parent.parent
 
+
+def _is_placeholder(value: str) -> bool:
+    """Return True when a config/env value looks like a placeholder."""
+    normalized = value.strip().lower()
+    return normalized.startswith("your-") and normalized.endswith("-here")
+
+
 _PPYLZ_ENV_MAP = {
     "default_model": DEFAULT_MODEL_ENV_VAR,
     "default_input": DEFAULT_INPUT_COLUMNS_ENV_VAR,
@@ -96,6 +103,8 @@ def _load_toml_config(path: Path) -> None:
 def _set_env_if_missing(name: str, value: str) -> None:
     """Set environment variable if it is currently unset or empty."""
     current = os.environ.get(name)
-    if current:
+    if current and not _is_placeholder(current):
+        return
+    if _is_placeholder(value):
         return
     os.environ[name] = value
