@@ -1,8 +1,6 @@
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/pplyz?period=total&units=international_system&left_color=grey&right_color=green&left_text=downloads)](https://pepy.tech/projects/pplyz)
-
 # pplyz
 
-Source & issues: https://github.com/masaki39/pplyz
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/pplyz?period=total&units=international_system&left_color=grey&right_color=green&left_text=downloads)](https://pepy.tech/projects/pplyz)
 
 Minimal CSV→LLM→CSV transformer powered by LiteLLM and uv.
 
