@@ -88,8 +88,8 @@ class TestProviderDetection:
 
     def test_detect_unknown_provider(self, mock_env_vars):
         """Test unknown provider detection."""
-        client = LLMClient(model_name="unknown-model", api_key="test")
-        assert client.provider == "unknown"
+        with pytest.raises(ValueError, match="Unknown model/provider"):
+            LLMClient(model_name="unknown-model", api_key="test")
 
 
 class TestJSONParsing:

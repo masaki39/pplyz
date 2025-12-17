@@ -128,6 +128,13 @@ class LLMClient:
 
     def _ensure_api_key(self, api_key: str | None) -> None:
         """Set or verify API key presence."""
+        if self.provider == "unknown":
+            raise ValueError(
+                f"Unknown model/provider '{self.model_name}'. "
+                "Use a supported provider prefix (e.g., gemini/, gpt-4o, claude-) "
+                "or configure a custom provider in LiteLLM before using this model."
+            )
+
         if api_key:
             self._set_api_key(api_key)
         else:
