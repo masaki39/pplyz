@@ -183,7 +183,7 @@ def get_user_prompt() -> str:
         The user-provided prompt.
     """
     print("\n" + SECTION_LINE)
-    print("PPLYZ - Prompt Input")
+    print("Prompt Input")
     print(SECTION_LINE)
     print(
         "\nPlease enter the prompt you want the LLM to run for each row.\n"
