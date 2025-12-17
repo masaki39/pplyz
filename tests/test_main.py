@@ -138,7 +138,7 @@ class TestParseArguments:
         assert args.model == "gpt-4o"
         assert args.preview is True
         assert args.output_fields == "flag:bool"
-        assert args.force is True
+        assert args.resume is False
         assert not hasattr(args, "list_models")
 
     def test_help_uses_compact_flags(self, capsys):

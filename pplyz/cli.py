@@ -117,15 +117,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--force",
         "-f",
-        dest="force",
-        action="store_true",
+        dest="resume",
+        action="store_false",
+        default=True,
         help="Force reprocessing of all rows and overwrite previous output (resume is default)",
-    )
-    parser.add_argument(
-        "--no-resume",
-        dest="force",
-        action="store_true",
-        help=argparse.SUPPRESS,
     )
 
     def _colorize_help(text: str) -> str:
@@ -370,7 +365,7 @@ def main() -> None:
                 columns=columns,
                 prompt=prompt,
                 response_model=response_model,
-                resume=not args.force,
+                resume=args.resume,
             )
 
     except FileNotFoundError as e:
