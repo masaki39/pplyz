@@ -58,6 +58,24 @@ class CSVProcessor:
         # All columns have data
         return False
 
+    def _apply_output_to_df(self, df: pd.DataFrame, idx, output: dict) -> None:
+        """Apply a single row's output into the DataFrame in-place."""
+        if not output:
+            return
+
+        row_df = pd.json_normalize(output)
+        for col in row_df.columns:
+            if col not in df.columns:
+                df[col] = pd.NA
+            df.at[idx, col] = row_df.at[0, col]
+
+    def _write_checkpoint(self, df: pd.DataFrame, output_path: Path) -> None:
+        """Persist current progress to a temporary file, then atomically replace output."""
+        tmp_path = output_path.with_name(output_path.name + ".tmp")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(tmp_path, index=False)
+        tmp_path.replace(output_path)
+
     def process_csv(
         self,
         input_path: Path | str,
@@ -112,6 +130,9 @@ class CSVProcessor:
 
         # Determine new column names
         new_column_names = get_field_names(response_model)
+        for col in new_column_names:
+            if col not in df.columns:
+                df[col] = pd.NA
 
         # Process each row
         schema_info = ",".join(new_column_names)
@@ -161,6 +182,7 @@ class CSVProcessor:
                 )
 
                 results.append(output)
+                self._apply_output_to_df(df, idx, output)
                 processed += 1
                 logger.info(color_text(f"{prefix} ✓ success", "green"))
 
@@ -178,31 +200,21 @@ class CSVProcessor:
                     }
                 )
 
+            # Persist progress after each row
+            self._write_checkpoint(df, output_path)
+
         # Attempt fallback retries for failed rows before finalizing results
         if failed_rows:
             failed_rows = self._retry_failed_rows(
-                failed_rows, results, columns, prompt, response_model
+                failed_rows, results, columns, prompt, response_model, df, output_path
             )
 
         errors = [f"Row {info['row_num']}: {info['error']}" for info in failed_rows]
 
-        # Convert results to DataFrame columns
-        if results:
-            # Flatten nested JSON into columns
-            result_df = pd.json_normalize(results)
-            result_df = result_df.reindex(df.index)
-
-            # Overwrite existing columns (or create new ones) with LLM output
-            for col in result_df.columns:
-                df[col] = result_df[col]
-
-        output_df = df
-
         # Save output
         logger.info("Saving results to %s", output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_df.to_csv(output_path, index=False)
-        logger.info("✓ Saved %d rows", len(output_df))
+        self._write_checkpoint(df, output_path)
+        logger.info("✓ Saved %d rows", len(df))
 
         # Print summary
         separator = "=" * 56
@@ -234,6 +246,8 @@ class CSVProcessor:
         columns: List[str],
         prompt: str,
         response_model: Optional[Type[BaseModel]] = None,
+        df: Optional[pd.DataFrame] = None,
+        output_path: Optional[Path] = None,
     ):
         """Retry rows that failed during the initial pass.
 
@@ -243,6 +257,8 @@ class CSVProcessor:
             columns: Columns to read from the input row.
             prompt: Prompt to send to the LLM.
             response_model: Optional response schema.
+            df: DataFrame to update in-place on success.
+            output_path: Output path for checkpointing on success.
 
         Returns:
             List of failure metadata that still failed after retry.
@@ -264,6 +280,8 @@ class CSVProcessor:
                     prompt, input_data, response_model
                 )
                 results[position] = output
+                if df is not None:
+                    self._apply_output_to_df(df, row.name, output)
                 logger.info(color_text(f"Row {row_num} ✓ recovered on retry", "green"))
             except Exception as retry_error:
                 formatted = format_error_message(retry_error)
@@ -272,6 +290,9 @@ class CSVProcessor:
                 logger.error(
                     color_text(f"Row {row_num} ✗ retry failed: {formatted}", "red")
                 )
+
+        if df is not None and output_path is not None:
+            self._write_checkpoint(df, output_path)
 
         if remaining_failures:
             logger.warning(
