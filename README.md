@@ -2,6 +2,8 @@
 
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/pplyz?period=total&units=international_system&left_color=grey&right_color=green&left_text=downloads)](https://pepy.tech/projects/pplyz)
 
+**p**ython + **p**rompt + ana**lyz**e
+
 Add LLM-generated columns to a CSV with one command.
 
 ## Requirements
