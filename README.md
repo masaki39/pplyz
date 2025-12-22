@@ -72,7 +72,7 @@ OPENAI_API_KEY = "sk-..."
 GROQ_API_KEY = "gsk-..."
 
 [pplyz]
-default_model = "gpt-4o-mini"
+default_model = "openai/gpt-4o-mini"
 default_input = "title,abstract"
 default_output = "relevant:bool,summary:str"
 ```
