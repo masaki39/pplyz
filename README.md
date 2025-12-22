@@ -88,15 +88,6 @@ pplyz loads settings in this order (earlier wins):
 
 To keep configs elsewhere, set `PPLYZ_CONFIG_DIR=/path/to/dir` and place `config.toml` there.
 
-### [pplyz] table (Default settings)
-
-| key | description | default |
-| --- | --- | --- |
-| `default_model` | Sets the fallback LiteLLM model when `--model` is omitted. | `gemini/gemini-2.5-flash-lite` |
-| `default_input` | Comma-separated columns used when `-i/--input` is omitted. | unset |
-| `default_output` | Output schema used when `-o/--output` is omitted. | unset |
-| `preview_rows` | Number of rows used when `--preview` is set (can also be overridden via `PPLYZ_PREVIEW_ROWS`). | `3` |
-
 ### [env] table (API keys)
 
 Set these inside the `[env]` table of your `config.toml`
@@ -119,6 +110,15 @@ Set these inside the `[env]` table of your `config.toml`
 | Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_API_KEY` |
 | AWS (Bedrock/SageMaker) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | Vertex AI | `GOOGLE_APPLICATION_CREDENTIALS` |
+
+### [pplyz] table (Default settings)
+
+| key | description | default |
+| --- | --- | --- |
+| `default_model` | Sets the fallback LiteLLM model when `--model` is omitted. | `gemini/gemini-2.5-flash-lite` |
+| `default_input` | Comma-separated columns used when `-i/--input` is omitted. | unset |
+| `default_output` | Output schema used when `-o/--output` is omitted. | unset |
+| `preview_rows` | Number of rows used when `--preview` is set (can also be overridden via `PPLYZ_PREVIEW_ROWS`). | `3` |
 
 ## Supported models
 
