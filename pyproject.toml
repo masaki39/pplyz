@@ -1,7 +1,7 @@
 [project]
 name = "pplyz"
-version = "0.1.4"
-description = "LLM-powered CSV data analyzer with structured output generation using LiteLLM (short for LLM Analyser)"
+version = "0.1.5"
+description = "Add LLM-generated columns to CSVs."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
