@@ -123,6 +123,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Force reprocessing of all rows and overwrite previous output (resume is default)",
     )
 
+    prompt_group = parser.add_mutually_exclusive_group()
+    prompt_group.add_argument(
+        "--prompt",
+        type=str,
+        help="Inline prompt text (skips interactive prompt entry)",
+    )
+    prompt_group.add_argument(
+        "--prompt-file",
+        type=str,
+        help="Path to a prompt text file (skips interactive prompt entry)",
+    )
+
     def _colorize_help(text: str) -> str:
         """Apply light ANSI colors to section headers when TTY."""
         if not sys.stdout.isatty():
@@ -142,7 +154,7 @@ def parse_arguments() -> argparse.Namespace:
         default_input = os.getenv(DEFAULT_INPUT_COLUMNS_ENV_VAR) or "(none)"
         default_output = os.getenv(DEFAULT_OUTPUT_FIELDS_ENV_VAR) or "(none)"
         defaults_block = (
-            "\nDefaults:\n"
+            "\n\nDefaults:\n"
             f"  model : {default_model}\n"
             f"  input : {default_input}\n"
             f"  output: {default_output}\n"
@@ -210,6 +222,35 @@ def get_user_prompt() -> str:
         sys.exit(1)
 
     return prompt
+
+
+def get_prompt_from_args(args: argparse.Namespace) -> str:
+    """Resolve prompt from CLI args or interactive input."""
+    if args.prompt is not None:
+        if not args.prompt.strip():
+            print("Error: Prompt cannot be empty")
+            sys.exit(1)
+        return args.prompt
+
+    if args.prompt_file is not None:
+        prompt_path = Path(args.prompt_file)
+        if not prompt_path.exists():
+            print(f"Error: Prompt file not found: {prompt_path}")
+            sys.exit(1)
+        if prompt_path.is_dir():
+            print(f"Error: Prompt path must be a file, not a directory: {prompt_path}")
+            sys.exit(1)
+        try:
+            content = prompt_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"Error: Unable to read prompt file: {exc}")
+            sys.exit(1)
+        if not content.strip():
+            print("Error: Prompt cannot be empty")
+            sys.exit(1)
+        return content
+
+    return get_user_prompt()
 
 
 def _build_prompt_session():
@@ -315,8 +356,8 @@ def main() -> None:
         print(f"Error: Input file must have a .csv extension: {input_path}")
         sys.exit(1)
 
-    # Get user prompt interactively
-    prompt = get_user_prompt()
+    # Get user prompt (inline/file/interactive)
+    prompt = get_prompt_from_args(args)
 
     # Create response model from the requested output schema when provided
     response_model = None

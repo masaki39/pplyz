@@ -1,7 +1,7 @@
 """Tests for main CLI module."""
 
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -96,7 +96,64 @@ class TestParseArguments:
         with patch.object(sys, "argv", test_args):
             args = parse_arguments()
 
-            assert args.output_fields == "score:float,label:str"
+        assert args.output_fields == "score:float,label:str"
+
+    def test_parse_with_prompt_option(self):
+        """Test parsing with inline prompt option."""
+        test_args = [
+            "pplyz",
+            "test.csv",
+            "--input",
+            "col1",
+            "--output",
+            "flag:bool",
+            "--prompt",
+            "Inline prompt",
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            args = parse_arguments()
+
+        assert args.prompt == "Inline prompt"
+        assert args.prompt_file is None
+
+    def test_parse_with_prompt_file_option(self):
+        """Test parsing with prompt file option."""
+        test_args = [
+            "pplyz",
+            "test.csv",
+            "--input",
+            "col1",
+            "--output",
+            "flag:bool",
+            "--prompt-file",
+            "prompt.txt",
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            args = parse_arguments()
+
+        assert args.prompt is None
+        assert args.prompt_file == "prompt.txt"
+
+    def test_parse_prompt_options_conflict(self):
+        """Inline and file prompts should be mutually exclusive."""
+        test_args = [
+            "pplyz",
+            "test.csv",
+            "--input",
+            "col1",
+            "--output",
+            "flag:bool",
+            "--prompt",
+            "Inline prompt",
+            "--prompt-file",
+            "prompt.txt",
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            with pytest.raises(SystemExit):
+                parse_arguments()
 
     def test_parse_positional_input(self):
         """Positional INPUT argument should populate input_path."""
@@ -405,3 +462,61 @@ class TestMainExecution:
                 with patch("pplyz.cli.LLMClient"):
                     with patch("pplyz.cli.CSVProcessor"):
                         main()
+
+    def test_main_uses_inline_prompt_without_interactive(self, tmp_path):
+        """Inline prompt should skip interactive prompt entry."""
+        csv_path = tmp_path / "data.csv"
+        csv_path.write_text("col1\nvalue\n")
+
+        test_args = [
+            "pplyz",
+            str(csv_path),
+            "--input",
+            "col1",
+            "--preview",
+            "--output",
+            "flag:bool",
+            "--prompt",
+            "Inline prompt",
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            with patch("pplyz.cli.get_user_prompt", side_effect=AssertionError):
+                with patch("pplyz.cli.LLMClient"):
+                    with patch("pplyz.cli.CSVProcessor") as mock_processor:
+                        instance = mock_processor.return_value
+                        instance.preview_sample = MagicMock()
+                        main()
+
+        _, kwargs = instance.preview_sample.call_args
+        assert kwargs["prompt"] == "Inline prompt"
+
+    def test_main_uses_prompt_file_without_interactive(self, tmp_path):
+        """Prompt file should skip interactive prompt entry."""
+        csv_path = tmp_path / "data.csv"
+        csv_path.write_text("col1\nvalue\n")
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Line one\nLine two\n")
+
+        test_args = [
+            "pplyz",
+            str(csv_path),
+            "--input",
+            "col1",
+            "--preview",
+            "--output",
+            "flag:bool",
+            "--prompt-file",
+            str(prompt_path),
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            with patch("pplyz.cli.get_user_prompt", side_effect=AssertionError):
+                with patch("pplyz.cli.LLMClient"):
+                    with patch("pplyz.cli.CSVProcessor") as mock_processor:
+                        instance = mock_processor.return_value
+                        instance.preview_sample = MagicMock()
+                        main()
+
+        _, kwargs = instance.preview_sample.call_args
+        assert kwargs["prompt"] == "Line one\nLine two\n"

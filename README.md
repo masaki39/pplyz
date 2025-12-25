@@ -35,7 +35,7 @@ adds `relevant` and `summary` columns to `test.csv`,
 and uses the `openai/gpt-4o-mini` model.
 
 > [!note]
-> The CLI prompts you for a task description before processing.
+> The CLI prompts you for a task description before processing unless `--prompt` or `--prompt-file` is provided.
 > Output is written back to the input CSV file (overwrite).
 
 ### Command arguments
@@ -54,6 +54,8 @@ pplyz -h
 | `-p, --preview` | Process a few rows and show would-be output without writing. | No |
 | `-m, --model` | LiteLLM model name. | No |
 | `-f, --force` | Reprocess all rows (resume is default). | No |
+| `--prompt` | Inline prompt text (skips interactive prompt entry). | No |
+| `--prompt-file` | Path to a prompt text file (skips interactive prompt entry). | No |
 
 ## Configuration
 
