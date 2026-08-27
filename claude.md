@@ -572,6 +572,7 @@ Combine boolean gates with descriptive string fields:
 | **Gemini Flash** | ✅ Excellent | ❌ Poor | May return unexpected string values |
 | **OpenAI GPT-4o** | ✅ Excellent | ✅ Good | Best enum support (via Pydantic) |
 | **Anthropic Claude** | ✅ Excellent | ⚠️ Moderate | Good with strong prompts |
+| **Ollama (local)** | ⚠️ Model-dependent | ❌ Poor | JSON mode only; small models drift. Test with `--preview` |
 
 **Recommendation**: For multi-provider compatibility, design schemas assuming string fields will not enforce enums.
 
@@ -722,7 +723,18 @@ Based on lessons learned:
 
 ## Version History
 
-### v0.2.0 (Current)
+### v0.1.6 (Current)
+- **Ollama / local model support**: `--model ollama_chat/<name>` runs against a local
+  Ollama server with no API key required
+- **`--api-base` flag** (+ `PPLYZ_API_BASE` / `OLLAMA_API_BASE` env, `default_api_base`
+  in `config.toml`): point pplyz at Ollama or any OpenAI-compatible local server
+- **JSON mode for schema-less providers**: providers that expose `response_format` but
+  not full schema support (e.g. Ollama) now get `{"type": "json_object"}` enforcement
+- **Actionable connection errors**: `APIConnectionError` is turned into a hint about
+  `ollama serve` / `ollama pull` / `--api-base`
+- No new dependencies (LiteLLM already ships Ollama support)
+
+### v0.2.0
 - **LiteLLM Integration**: Replaced `google-generativeai` with LiteLLM
 - **Multi-Provider Support**: Supports Gemini, OpenAI, Anthropic, and 100+ providers
 - **Enforced JSON Mode**: Uses `response_format={"type": "json_object"}`

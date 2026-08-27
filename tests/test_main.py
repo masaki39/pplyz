@@ -65,6 +65,58 @@ class TestParseArguments:
 
             assert args.model == "gpt-4o"
 
+    def test_parse_with_api_base_option(self, monkeypatch):
+        """Test parsing with --api-base option for local servers."""
+        monkeypatch.delenv("PPLYZ_API_BASE", raising=False)
+        monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+        test_args = [
+            "pplyz",
+            "test.csv",
+            "--input",
+            "col1",
+            "--model",
+            "ollama_chat/llama3.1",
+            "--api-base",
+            "http://localhost:11434",
+            "--output",
+            "flag:bool",
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            args = parse_arguments()
+
+        assert args.api_base == "http://localhost:11434"
+
+    def test_api_base_forwarded_to_client(self, tmp_path):
+        """--api-base should be passed through to LLMClient."""
+        csv_path = tmp_path / "data.csv"
+        csv_path.write_text("col1\nvalue\n")
+
+        test_args = [
+            "pplyz",
+            str(csv_path),
+            "--input",
+            "col1",
+            "--preview",
+            "--output",
+            "flag:bool",
+            "--prompt",
+            "Inline prompt",
+            "--model",
+            "ollama_chat/llama3.1",
+            "--api-base",
+            "http://localhost:11434",
+        ]
+
+        with patch.object(sys, "argv", test_args):
+            with patch("pplyz.cli.LLMClient") as mock_client:
+                with patch("pplyz.cli.CSVProcessor"):
+                    main()
+
+        _, kwargs = mock_client.call_args
+        assert kwargs["api_base"] == "http://localhost:11434"
+        assert kwargs["model_name"] == "ollama_chat/llama3.1"
+
     def test_parse_with_preview_option(self):
         """Test parsing with preview option."""
         test_args = [

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 from pplyz.config import (
+    API_BASE_ENV_VAR,
     DEFAULT_INPUT_COLUMNS_ENV_VAR,
     DEFAULT_OUTPUT_FIELDS_ENV_VAR,
     DEFAULT_MODEL_ENV_VAR,
@@ -41,6 +42,7 @@ _PPYLZ_ENV_MAP = {
     "default_input": DEFAULT_INPUT_COLUMNS_ENV_VAR,
     "default_output": DEFAULT_OUTPUT_FIELDS_ENV_VAR,
     "preview_rows": PREVIEW_ROWS_ENV_VAR,
+    "default_api_base": API_BASE_ENV_VAR,
 }
 
 

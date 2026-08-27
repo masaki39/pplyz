@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Type
 import litellm
 from litellm import completion, supports_response_schema
 from litellm.exceptions import (
+    APIConnectionError,
     APIError,
     BadRequestError,
     RateLimitError,
@@ -19,9 +20,11 @@ from pydantic import BaseModel
 from .config import (
     API_KEY_ENV_VARS,
     MAX_RETRIES,
+    NO_API_KEY_PROVIDERS,
     REQUEST_DELAY,
     RETRY_BACKOFF_SCHEDULE,
     USE_JSON_MODE,
+    get_default_api_base,
     get_default_model,
 )
 from .utils import format_error_message
@@ -32,18 +35,28 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """Client for interacting with multiple LLM providers via LiteLLM with retry logic."""
 
-    def __init__(self, model_name: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ):
         """Initialize the LLM client.
 
         Args:
-            model_name: Name of the model to use (e.g., "gemini/gemini-2.5-flash-lite", "gpt-4o").
-                Defaults to the value of PPLYZ_DEFAULT_MODEL env var (or Gemini Flash Lite).
+            model_name: Name of the model to use (e.g., "gemini/gemini-2.5-flash-lite", "gpt-4o",
+                "ollama_chat/llama3.1"). Defaults to the value of PPLYZ_DEFAULT_MODEL env var
+                (or Gemini Flash Lite).
             api_key: Optional API key. If None, LiteLLM will use standard environment variables.
+            api_base: Optional base URL for the provider's API. Useful for Ollama and other
+                OpenAI-compatible local servers. If None, falls back to PPLYZ_API_BASE /
+                OLLAMA_API_BASE env vars.
 
         Raises:
             ValueError: If required API key is not found in environment.
         """
         self.model_name = model_name or get_default_model()
+        self.api_base = api_base or get_default_api_base()
         self.last_request_time = 0
 
         # Determine provider from model name
@@ -55,10 +68,12 @@ class LLMClient:
         # Configure LiteLLM
         litellm.drop_params = True  # Drop unsupported params instead of erroring
         litellm.set_verbose = False  # Disable verbose logging
+        litellm.suppress_debug_info = True  # Hide the "Give Feedback / Get Help" banner
         litellm.enable_json_schema_validation = True  # Enable client-side validation
 
-        # Check if model supports response schema
+        # Check if model supports response schema / JSON mode
         self.supports_schema = supports_response_schema(self.model_name)
+        self.supports_json_mode = self._detect_json_mode_support()
 
     def _detect_provider(self, model_name: str) -> str:
         """Detect the provider from the model name."""
@@ -87,7 +102,26 @@ class LLMClient:
         for provider in API_KEY_ENV_VARS.keys():
             if model_name.startswith(f"{provider}/"):
                 return provider
+        for provider in NO_API_KEY_PROVIDERS:
+            if model_name.startswith(f"{provider}/"):
+                return provider
         return "unknown"
+
+    def _detect_json_mode_support(self) -> bool:
+        """Return True when the provider accepts response_format (JSON mode).
+
+        Some providers (e.g. Ollama) do not support full JSON *schema* enforcement
+        but still honour ``response_format={"type": "json_object"}``.
+        """
+        if self.supports_schema:
+            return True
+        try:
+            params = litellm.get_supported_openai_params(
+                model=self.model_name, custom_llm_provider=self.provider
+            )
+        except Exception:
+            return False
+        return bool(params) and "response_format" in params
 
     def _set_api_key(self, api_key: str) -> None:
         """Set the API key for the detected provider.
@@ -106,6 +140,12 @@ class LLMClient:
 
     def _verify_api_key(self) -> None:
         """Verify that the required API key is set in environment."""
+        if self.provider in NO_API_KEY_PROVIDERS:
+            logger.debug(
+                "Provider '%s' runs locally; no API key required.", self.provider
+            )
+            return
+
         env_vars = API_KEY_ENV_VARS.get(self.provider)
         if not env_vars:
             logger.warning(
@@ -131,8 +171,9 @@ class LLMClient:
         if self.provider == "unknown":
             raise ValueError(
                 f"Unknown model/provider '{self.model_name}'. "
-                "Use a supported provider prefix (e.g., gemini/, gpt-4o, claude-) "
-                "or configure a custom provider in LiteLLM before using this model."
+                "Use a supported provider prefix (e.g., gemini/, gpt-4o, claude-, "
+                "ollama_chat/) or configure a custom provider in LiteLLM before using "
+                "this model."
             )
 
         if api_key:
@@ -166,10 +207,15 @@ class LLMClient:
             "messages": messages,
         }
 
-        if use_schema_format and response_model is not None:
-            if self.supports_schema:
-                completion_params["response_format"] = response_model
-        elif use_schema_format and USE_JSON_MODE and self.supports_schema:
+        if self.api_base:
+            completion_params["api_base"] = self.api_base
+
+        if use_schema_format and response_model is not None and self.supports_schema:
+            completion_params["response_format"] = response_model
+        elif use_schema_format and USE_JSON_MODE and self.supports_json_mode:
+            # Providers without full schema support (e.g. Ollama) still honour
+            # plain JSON-object mode; combined with the schema hints in the prompt
+            # this keeps outputs parseable.
             completion_params["response_format"] = {"type": "json_object"}
 
         return completion_params
@@ -262,9 +308,12 @@ Output (JSON only):"""
                         "Model rejected response_format/JSON mode; retrying without schema enforcement."
                     )
                     self.supports_schema = False
+                    self.supports_json_mode = False
                     use_schema_format = False
                     continue
                 raise
+            except APIConnectionError as exc:
+                raise ConnectionError(self._connection_error_hint(exc)) from exc
             except (RateLimitError, ServiceUnavailableError, APIError, Timeout) as exc:
                 if attempt >= len(RETRY_BACKOFF_SCHEDULE):
                     raise
@@ -281,6 +330,19 @@ Output (JSON only):"""
                 attempt += 1
 
         raise RuntimeError("LLM retry logic exhausted unexpectedly")
+
+    def _connection_error_hint(self, exc: Exception) -> str:
+        """Build an actionable message for connection failures."""
+        target = self.api_base or "the configured endpoint"
+        base = f"Could not connect to {self.provider} at {target}: {exc}"
+        if self.provider in NO_API_KEY_PROVIDERS:
+            return (
+                f"{base}\n"
+                "Make sure the Ollama server is running ('ollama serve') and the model "
+                f"is pulled ('ollama pull {self.model_name.split('/', 1)[-1]}'). "
+                "Override the URL with --api-base or the OLLAMA_API_BASE env var."
+            )
+        return base
 
     def _is_response_format_error(self, exc: Exception) -> bool:
         """Detect provider errors caused by response_format/JSON mode."""

@@ -1,6 +1,6 @@
 [project]
 name = "pplyz"
-version = "0.1.5"
+version = "0.1.6"
 description = "Add LLM-generated columns to CSVs."
 readme = "README.md"
 requires-python = ">=3.12"

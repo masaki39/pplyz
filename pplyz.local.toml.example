@@ -62,9 +62,13 @@ WATSONX_API_KEY = "your-watsonx-api-key-here"
 # Databricks
 DATABRICKS_TOKEN = "your-databricks-token-here"
 
+# Ollama (local, no API key). Only needed if not the default localhost:11434
+# OLLAMA_API_BASE = "http://localhost:11434"
+
 [pplyz]
 # You can also set pplyz-specific defaults here
 default_model = "gemini/gemini-2.5-flash-lite"
 default_input = "title,abstract"
 default_output = "include:bool,summary:str"
 preview_rows = 5  # Number of rows shown when running with --preview
+# default_api_base = "http://localhost:11434"  # e.g. for Ollama / local servers

@@ -9,7 +9,7 @@ Add LLM-generated columns to a CSV with one command.
 ## Requirements
 
 - [uv](https://github.com/astral-sh/uv) (Recommended)
-- At least one LiteLLM-compatible API key (OpenAI, Gemini, Anthropic, etc.)
+- At least one LiteLLM-compatible API key (OpenAI, Gemini, Anthropic, etc.), **or** a local [Ollama](https://ollama.com/) server (no API key needed)
 
 uv is the easiest way to run the CLI.
 
@@ -53,6 +53,7 @@ pplyz -h
 | `-o, --output` | Output schema (e.g., `score:int,notes:str`). Types: `bool`, `int`, `float`, `str`. | Yes (unless default is set) |
 | `-p, --preview` | Process a few rows and show would-be output without writing. | No |
 | `-m, --model` | LiteLLM model name. | No |
+| `--api-base` | Base URL for the LLM API (for Ollama or other OpenAI-compatible local servers). | No |
 | `-f, --force` | Reprocess all rows (resume is default). | No |
 | `--prompt` | Inline prompt text (skips interactive prompt entry). | No |
 | `--prompt-file` | Path to a prompt text file (skips interactive prompt entry). | No |
@@ -114,6 +115,7 @@ Set these inside the `[env]` table of your `config.toml`
 | Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_API_KEY` |
 | AWS (Bedrock/SageMaker) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | Vertex AI | `GOOGLE_APPLICATION_CREDENTIALS` |
+| Ollama (local) | *none* — set `OLLAMA_API_BASE` if not `http://localhost:11434` |
 
 ### [pplyz] table (Default settings)
 
@@ -122,7 +124,33 @@ Set these inside the `[env]` table of your `config.toml`
 | `default_model` | Sets the fallback LiteLLM model when `--model` is omitted. | `gemini/gemini-2.5-flash-lite` |
 | `default_input` | Comma-separated columns used when `-i/--input` is omitted. | unset |
 | `default_output` | Output schema used when `-o/--output` is omitted. | unset |
+| `default_api_base` | Base URL passed to the provider (same as `--api-base` / `PPLYZ_API_BASE`). | unset |
 | `preview_rows` | Number of rows used when `--preview` is set (can also be overridden via `PPLYZ_PREVIEW_ROWS`). | `3` |
+
+## Local models with Ollama
+
+pplyz can run entirely offline against a local [Ollama](https://ollama.com/) server — no API key required.
+
+```bash
+# 1. Start Ollama and pull a model
+ollama serve            # usually already running
+ollama pull llama3.1
+
+# 2. Run pplyz against it (use the ollama_chat/ prefix)
+pplyz test.csv \
+  --input title,abstract \
+  --output "relevant:bool,summary:str" \
+  --model ollama_chat/llama3.1
+```
+
+Notes:
+
+- Use the `ollama_chat/` prefix (chat API); it handles system prompts better than `ollama/`.
+- The default endpoint is `http://localhost:11434`. Override it with `--api-base`,
+  the `OLLAMA_API_BASE` / `PPLYZ_API_BASE` env var, or `default_api_base` in `config.toml`.
+- JSON output is enforced via Ollama's JSON mode. Local models follow schemas less
+  reliably than hosted ones — prefer `bool` fields for decisions and test with `--preview`.
+- `--api-base` also works for other OpenAI-compatible local servers (LM Studio, vLLM, …).
 
 ## Supported models
 

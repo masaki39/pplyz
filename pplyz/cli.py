@@ -13,6 +13,7 @@ from pplyz.config import (
     DEFAULT_OUTPUT_FIELDS_ENV_VAR,
     DEFAULT_PREVIEW_ROWS,
     PREVIEW_ROWS_ENV_VAR,
+    get_default_api_base,
     get_default_model,
 )
 from pplyz.llm_client import LLMClient
@@ -112,6 +113,17 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         default=default_model,
         help=f"LLM model name (default: {default_model})",
+    )
+
+    parser.add_argument(
+        "--api-base",
+        dest="api_base",
+        type=str,
+        default=get_default_api_base(),
+        help=(
+            "Base URL for the LLM API (for Ollama or other OpenAI-compatible "
+            "local servers). Defaults to PPLYZ_API_BASE / OLLAMA_API_BASE."
+        ),
     )
 
     parser.add_argument(
@@ -371,7 +383,7 @@ def main() -> None:
     # Initialize LLM client
     logger.info("Initializing LLM client (model: %s)...", args.model)
     try:
-        llm_client = LLMClient(model_name=args.model)
+        llm_client = LLMClient(model_name=args.model, api_base=args.api_base)
         logger.info("✓ LLM client initialized (provider: %s)", llm_client.provider)
     except ValueError as e:
         sample_keys = [envs[0] for envs in API_KEY_ENV_VARS.values() if envs]

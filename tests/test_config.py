@@ -69,6 +69,24 @@ class TestConfig:
         """Test JSON mode is enabled."""
         assert config.USE_JSON_MODE is True
 
+    def test_no_api_key_providers(self):
+        """Ollama providers should be listed as not requiring an API key."""
+        assert "ollama" in config.NO_API_KEY_PROVIDERS
+        assert "ollama_chat" in config.NO_API_KEY_PROVIDERS
+        assert "openai" not in config.NO_API_KEY_PROVIDERS
+
+    def test_get_default_api_base(self, monkeypatch):
+        """API base resolves from PPLYZ_API_BASE then OLLAMA_API_BASE."""
+        monkeypatch.delenv("PPLYZ_API_BASE", raising=False)
+        monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+        assert config.get_default_api_base() is None
+
+        monkeypatch.setenv("OLLAMA_API_BASE", "http://box:11434")
+        assert config.get_default_api_base() == "http://box:11434"
+
+        monkeypatch.setenv("PPLYZ_API_BASE", "http://override:1234")
+        assert config.get_default_api_base() == "http://override:1234"
+
     def test_project_paths(self):
         """Test project paths are set."""
         assert config.PROJECT_ROOT.exists()

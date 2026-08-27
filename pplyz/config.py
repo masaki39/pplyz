@@ -12,12 +12,25 @@ DEFAULT_PREVIEW_ROWS = 3
 DEFAULT_MODEL_FALLBACK = "gemini/gemini-2.5-flash-lite"
 
 
+API_BASE_ENV_VAR = "PPLYZ_API_BASE"
+OLLAMA_API_BASE_ENV_VAR = "OLLAMA_API_BASE"
+
+
 def get_default_model() -> str:
     """Return the default model, allowing override via environment variable."""
     return os.getenv(DEFAULT_MODEL_ENV_VAR, DEFAULT_MODEL_FALLBACK)
 
 
+def get_default_api_base() -> str | None:
+    """Return the API base URL override, if configured via environment."""
+    return os.getenv(API_BASE_ENV_VAR) or os.getenv(OLLAMA_API_BASE_ENV_VAR) or None
+
+
 DEFAULT_MODEL = get_default_model()
+
+# Providers that run locally / self-hosted and do not require an API key.
+# LiteLLM exposes both an "ollama" (generate API) and "ollama_chat" (chat API) provider.
+NO_API_KEY_PROVIDERS = {"ollama", "ollama_chat"}
 
 # Multi-provider API key environment variables (per LiteLLM docs)
 # Each provider entry lists accepted env var names in priority order.

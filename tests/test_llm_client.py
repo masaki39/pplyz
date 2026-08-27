@@ -4,7 +4,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from litellm.exceptions import BadRequestError, RateLimitError
+from litellm.exceptions import APIConnectionError, BadRequestError, RateLimitError
 from pydantic import BaseModel
 
 from pplyz import config
@@ -90,6 +90,87 @@ class TestProviderDetection:
         """Test unknown provider detection."""
         with pytest.raises(ValueError, match="Unknown model/provider"):
             LLMClient(model_name="unknown-model", api_key="test")
+
+    def test_detect_ollama_provider(self, mock_env_vars):
+        """Test Ollama provider detection (generate API)."""
+        client = LLMClient(model_name="ollama/llama3")
+        assert client.provider == "ollama"
+
+    def test_detect_ollama_chat_provider(self, mock_env_vars):
+        """Test Ollama provider detection (chat API)."""
+        client = LLMClient(model_name="ollama_chat/llama3.1")
+        assert client.provider == "ollama_chat"
+
+
+class TestOllamaSupport:
+    """Test local Ollama provider handling."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_api_base(self, monkeypatch):
+        monkeypatch.delenv("PPLYZ_API_BASE", raising=False)
+        monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+
+    def test_init_without_any_api_key_succeeds(self, monkeypatch, caplog):
+        """Ollama needs no API key and should not warn about unknown providers."""
+        for env_vars in config.API_KEY_ENV_VARS.values():
+            for env_var in env_vars:
+                monkeypatch.delenv(env_var, raising=False)
+
+        with caplog.at_level("WARNING"):
+            client = LLMClient(model_name="ollama_chat/llama3.1")
+
+        assert client.provider == "ollama_chat"
+        assert "Unknown provider" not in caplog.text
+
+    def test_json_mode_supported_without_schema(self, mock_env_vars):
+        """Ollama does not support response schema but does support JSON mode."""
+        client = LLMClient(model_name="ollama_chat/llama3.1")
+        assert client.supports_schema is False
+        assert client.supports_json_mode is True
+
+    def test_api_base_from_argument_is_passed_to_completion(
+        self, mock_env_vars, sample_llm_response
+    ):
+        """Explicit api_base should be forwarded to litellm.completion."""
+        client = LLMClient(
+            model_name="ollama_chat/llama3.1", api_base="http://localhost:11434"
+        )
+
+        with patch("pplyz.llm_client.completion") as mock_completion:
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = json.dumps(sample_llm_response)
+            mock_completion.return_value = mock_response
+
+            client.generate_structured_output(
+                prompt="Test prompt", input_data={"test": "data"}
+            )
+
+        _, kwargs = mock_completion.call_args
+        assert kwargs["api_base"] == "http://localhost:11434"
+        assert kwargs["response_format"] == {"type": "json_object"}
+
+    def test_api_base_from_env(self, mock_env_vars, monkeypatch):
+        """OLLAMA_API_BASE env var should be used when no argument is given."""
+        monkeypatch.setenv("OLLAMA_API_BASE", "http://box:11434")
+        client = LLMClient(model_name="ollama_chat/llama3.1")
+        assert client.api_base == "http://box:11434"
+
+    def test_connection_error_raises_actionable_message(self, mock_env_vars):
+        """Connection failures should surface a helpful Ollama hint."""
+        client = LLMClient(
+            model_name="ollama_chat/llama3.1", api_base="http://localhost:11434"
+        )
+
+        with patch("pplyz.llm_client.completion") as mock_completion:
+            mock_completion.side_effect = APIConnectionError(
+                message="Connection refused", llm_provider="ollama", model="llama3.1"
+            )
+
+            with pytest.raises(ValueError, match="ollama serve"):
+                client.generate_structured_output(
+                    prompt="Test prompt", input_data={"test": "data"}
+                )
 
 
 class TestJSONParsing:
