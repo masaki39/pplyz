@@ -271,3 +271,52 @@ class TestPreviewSample:
 
             # Default is 3 rows, but sample CSV only has 3 rows
             assert mock_generate.call_count == 3
+
+
+class TestParallelProcessing:
+    """Tests for CSVProcessor with workers > 1."""
+
+    class _FakeClient:
+        model_name = "fake"
+
+        def __init__(self, fail_titles=()):
+            self.fail_titles = set(fail_titles)
+            self.calls = 0
+
+        def generate_structured_output(self, prompt, input_data, response_model):
+            self.calls += 1
+            if input_data["title"] in self.fail_titles:
+                self.fail_titles.discard(input_data["title"])  # succeed on retry
+                raise RuntimeError("transient")
+            return {"length": len(input_data["title"])}
+
+    def test_parallel_writes_every_row(self, sample_csv_file):
+        client = self._FakeClient(fail_titles=["Gene expression analysis"])
+        processor = CSVProcessor(client)
+
+        processor.process_csv(
+            sample_csv_file,
+            sample_csv_file,
+            ["title"],
+            "p",
+            create_output_model_from_string("length:int"),
+            workers=3,
+        )
+
+        df = pd.read_csv(sample_csv_file)
+        assert df["length"].tolist() == [len(t) for t in df["title"]]
+        # 3 rows + 1 retry of the failed row
+        assert client.calls == 4
+
+
+class TestResumeDetection:
+    def test_zero_is_an_answer_not_missing(self):
+        """Regression: a probability of 0.0 must not trigger reprocessing."""
+        processor = CSVProcessor(TestParallelProcessing._FakeClient())
+        row = pd.Series({"title": "x", "score": 0.0})
+        assert processor._should_process_row(row, ["score"]) is False
+
+    def test_empty_json_is_missing(self):
+        processor = CSVProcessor(TestParallelProcessing._FakeClient())
+        row = pd.Series({"title": "x", "data": "{}"})
+        assert processor._should_process_row(row, ["data"]) is True

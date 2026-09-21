@@ -22,7 +22,6 @@ from .config import (
     JEV_API_KEY_ENV_VARS,
     JEV_REQUEST_TIMEOUT,
     MAX_RETRIES,
-    REQUEST_DELAY,
     RETRY_BACKOFF_SCHEDULE,
     get_default_jev_model,
 )
@@ -45,7 +44,11 @@ class JevRequestError(RuntimeError):
 
 
 class JevClient:
-    """Ask Jev a fixed set of questions about each row."""
+    """Ask Jev a fixed set of questions about each row.
+
+    Thread-safe: `pplyz judge` calls it from several worker threads. There is no
+    fixed delay between requests; rate limits (429) are handled by retrying.
+    """
 
     def __init__(
         self,
@@ -53,7 +56,7 @@ class JevClient:
         model_name: str | None = None,
         endpoint: str | None = None,
         api_key: str | None = None,
-        with_confidence: bool = False,
+        with_probability: bool = False,
     ):
         """Initialize the Jev client.
 
@@ -63,7 +66,7 @@ class JevClient:
             endpoint: Decisions endpoint URL (default: OpenRouter's alpha endpoint).
             api_key: Optional API key. Defaults to OPENROUTER_API_KEY
                 (``keychain:`` references are resolved).
-            with_confidence: Also emit ``<column>_confidence`` values.
+            with_probability: Also emit ``<column>_p`` for choice/scale answers.
 
         Raises:
             ValueError: If no questions are given or the API key is missing.
@@ -73,9 +76,8 @@ class JevClient:
         self.questions = questions
         self.model_name = model_name or get_default_jev_model()
         self.endpoint = endpoint or DEFAULT_JEV_ENDPOINT
-        self.with_confidence = with_confidence
+        self.with_probability = with_probability
         self.provider = "openrouter"
-        self.last_request_time = 0.0
         self.api_key = api_key or self._load_api_key()
 
     def _load_api_key(self) -> str:
@@ -100,12 +102,6 @@ class JevClient:
                 _question_id(i): q.to_jev() for i, q in enumerate(self.questions)
             },
         }
-
-    def _rate_limit_delay(self) -> None:
-        elapsed = time.time() - self.last_request_time
-        if elapsed < REQUEST_DELAY:
-            time.sleep(REQUEST_DELAY - elapsed)
-        self.last_request_time = time.time()
 
     def _post(self, body: Dict[str, Any]) -> Dict[str, Any]:
         request = urllib.request.Request(
@@ -135,7 +131,6 @@ class JevClient:
     def _post_with_retry(self, body: Dict[str, Any]) -> Dict[str, Any]:
         attempt = 0
         while True:
-            self._rate_limit_delay()
             try:
                 return self._post(body)
             except JevRequestError as exc:
@@ -174,7 +169,7 @@ class JevClient:
             answer = answers.get(_question_id(i))
             if not isinstance(answer, dict):
                 raise ValueError(f"Jev returned no answer for '{question.column}'")
-            output.update(output_values(question, answer, self.with_confidence))
+            output.update(output_values(question, answer, self.with_probability))
         return output
 
 

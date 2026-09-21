@@ -2,6 +2,7 @@
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from time import time
 from typing import List, Optional, Type
@@ -9,7 +10,7 @@ from typing import List, Optional, Type
 import pandas as pd
 from pydantic import BaseModel
 
-from .config import DEFAULT_PREVIEW_ROWS
+from .config import CHECKPOINT_INTERVAL, DEFAULT_PREVIEW_ROWS
 from .llm_client import LLMClient
 from .schemas import get_field_names
 from .utils import color_text, format_error_message
@@ -47,7 +48,8 @@ class CSVProcessor:
                 # Try to parse as JSON and check if empty
                 try:
                     parsed = json.loads(str(value))
-                    if not parsed or parsed == {}:
+                    # Only empty containers count as missing; 0 / 0.0 are answers.
+                    if isinstance(parsed, (dict, list)) and not parsed:
                         return True
                 except (json.JSONDecodeError, TypeError, ValueError):
                     # Not valid JSON, keep existing value
@@ -84,6 +86,7 @@ class CSVProcessor:
         prompt: str,
         response_model: Optional[Type[BaseModel]] = None,
         resume: bool = True,
+        workers: int = 1,
     ) -> None:
         """Process a CSV file and add LLM-generated columns.
 
@@ -94,6 +97,8 @@ class CSVProcessor:
             prompt: User-provided prompt describing the task.
             response_model: Optional Pydantic model for structured output.
             resume: If True and output exists, skip rows with data.
+            workers: Number of rows processed concurrently. 1 keeps the
+                sequential behaviour; >1 requires a thread-safe client.
 
         Raises:
             FileNotFoundError: If input file doesn't exist.
@@ -151,57 +156,74 @@ class CSVProcessor:
         total_rows = len(df)
         start_time = time()
 
-        for idx, row in df.iterrows():
-            row_num = idx + 1
-            result_position = len(results)
-            prefix = f"[{row_num}/{total_rows}]"
+        if workers > 1:
+            results = [{} for _ in range(total_rows)]
+            processed, skipped, failed_rows = self._process_rows_parallel(
+                df,
+                columns,
+                prompt,
+                response_model,
+                new_column_names,
+                resume,
+                output_path,
+                workers,
+            )
+        else:
+            for idx, row in df.iterrows():
+                row_num = idx + 1
+                result_position = len(results)
+                prefix = f"[{row_num}/{total_rows}]"
 
-            # Check if row should be skipped (resume mode)
-            if (
-                resume
-                and new_column_names
-                and not self._should_process_row(row, new_column_names)
-            ):
-                logger.info(color_text(f"{prefix} → skip (already processed)", "cyan"))
-                # Keep existing data
-                existing_data = {
-                    col: row[col] if col in row.index else None
-                    for col in new_column_names
-                }
-                results.append(existing_data if existing_data else {})
-                skipped += 1
-                continue
-
-            try:
-                # Extract input data from selected columns
-                input_data = {col: row[col] for col in columns}
-
-                # Generate structured output
-                output = self.llm_client.generate_structured_output(
-                    prompt, input_data, response_model
-                )
-
-                results.append(output)
-                self._apply_output_to_df(df, idx, output)
-                processed += 1
-                logger.info(color_text(f"{prefix} ✓ success", "green"))
-
-            except Exception as e:
-                logger.error(color_text(f"{prefix} ✗ {format_error_message(e)}", "red"))
-                # Add empty result to maintain row alignment
-                results.append({})
-                processed += 1
-                failed_rows.append(
-                    {
-                        "position": result_position,
-                        "row": row.copy(),
-                        "row_num": row_num,
-                        "error": format_error_message(e),
+                # Check if row should be skipped (resume mode)
+                if (
+                    resume
+                    and new_column_names
+                    and not self._should_process_row(row, new_column_names)
+                ):
+                    logger.info(
+                        color_text(f"{prefix} → skip (already processed)", "cyan")
+                    )
+                    # Keep existing data
+                    existing_data = {
+                        col: row[col] if col in row.index else None
+                        for col in new_column_names
                     }
-                )
+                    results.append(existing_data if existing_data else {})
+                    skipped += 1
+                    continue
 
-            # Persist progress after each row
-            self._write_checkpoint(df, output_path)
+                try:
+                    # Extract input data from selected columns
+                    input_data = {col: row[col] for col in columns}
+
+                    # Generate structured output
+                    output = self.llm_client.generate_structured_output(
+                        prompt, input_data, response_model
+                    )
+
+                    results.append(output)
+                    self._apply_output_to_df(df, idx, output)
+                    processed += 1
+                    logger.info(color_text(f"{prefix} ✓ success", "green"))
+
+                except Exception as e:
+                    logger.error(
+                        color_text(f"{prefix} ✗ {format_error_message(e)}", "red")
+                    )
+                    # Add empty result to maintain row alignment
+                    results.append({})
+                    processed += 1
+                    failed_rows.append(
+                        {
+                            "position": result_position,
+                            "row": row.copy(),
+                            "row_num": row_num,
+                            "error": format_error_message(e),
+                        }
+                    )
+
+                # Persist progress after each row
+                self._write_checkpoint(df, output_path)
 
         # Attempt fallback retries for failed rows before finalizing results
         if failed_rows:
@@ -238,6 +260,92 @@ class CSVProcessor:
                 logger.warning("... %d additional error(s)", len(errors) - 5)
 
         logger.info(separator)
+
+    def _process_rows_parallel(
+        self,
+        df: pd.DataFrame,
+        columns: List[str],
+        prompt: str,
+        response_model: Optional[Type[BaseModel]],
+        new_column_names: List[str],
+        resume: bool,
+        output_path: Path,
+        workers: int,
+    ) -> tuple[int, int, list]:
+        """Process rows concurrently, applying results in the main thread.
+
+        Checkpoints are written at most every CHECKPOINT_INTERVAL seconds instead
+        of after every row. On interrupt, queued rows are cancelled and progress
+        is saved before re-raising.
+
+        Returns:
+            (processed, skipped, failed_rows) in the same shape as the
+            sequential loop.
+        """
+        total_rows = len(df)
+        pending = []
+        skipped = 0
+        for position, (idx, row) in enumerate(df.iterrows()):
+            if (
+                resume
+                and new_column_names
+                and not self._should_process_row(row, new_column_names)
+            ):
+                skipped += 1
+                continue
+            pending.append((position, idx, row))
+
+        if skipped:
+            logger.info(
+                color_text(f"→ skip {skipped} already processed row(s)", "cyan")
+            )
+        logger.info("Running %d row(s) with %d workers", len(pending), workers)
+
+        failed_rows = []
+        processed = 0
+        last_checkpoint = time()
+        executor = ThreadPoolExecutor(max_workers=workers)
+        try:
+            futures = {
+                executor.submit(
+                    self.llm_client.generate_structured_output,
+                    prompt,
+                    {col: row[col] for col in columns},
+                    response_model,
+                ): (position, idx, row)
+                for position, idx, row in pending
+            }
+            for future in as_completed(futures):
+                position, idx, row = futures[future]
+                row_num = idx + 1
+                prefix = f"[{row_num}/{total_rows}]"
+                processed += 1
+                try:
+                    output = future.result()
+                    self._apply_output_to_df(df, idx, output)
+                    logger.info(color_text(f"{prefix} ✓ success", "green"))
+                except Exception as e:
+                    formatted = format_error_message(e)
+                    logger.error(color_text(f"{prefix} ✗ {formatted}", "red"))
+                    failed_rows.append(
+                        {
+                            "position": position,
+                            "row": row.copy(),
+                            "row_num": row_num,
+                            "error": formatted,
+                        }
+                    )
+                if time() - last_checkpoint >= CHECKPOINT_INTERVAL:
+                    self._write_checkpoint(df, output_path)
+                    last_checkpoint = time()
+        except BaseException:
+            executor.shutdown(wait=False, cancel_futures=True)
+            self._write_checkpoint(df, output_path)
+            raise
+        executor.shutdown()
+
+        failed_rows.sort(key=lambda info: info["position"])
+        return processed, skipped, failed_rows
 
     def _retry_failed_rows(
         self,

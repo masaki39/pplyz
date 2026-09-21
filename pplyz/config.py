@@ -17,6 +17,7 @@ DEFAULT_JEV_MODEL_FALLBACK = "typesafe/jev-1.13"
 DEFAULT_JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_API_KEY_ENV_VARS = ["OPENROUTER_API_KEY"]
 JEV_REQUEST_TIMEOUT = 60  # seconds
+DEFAULT_JEV_WORKERS = 8  # concurrent requests for `pplyz judge`
 
 
 API_BASE_ENV_VAR = "PPLYZ_API_BASE"
@@ -85,6 +86,7 @@ TRANSIENT_ERROR_CODES = [500, 502, 503, 504]  # Transient errors to retry
 # Processing Configuration
 DEFAULT_BATCH_SIZE = 1  # Process one row at a time to respect API limits
 REQUEST_DELAY = 0.5  # seconds between requests to avoid rate limiting
+CHECKPOINT_INTERVAL = 2.0  # seconds between CSV checkpoints in parallel mode
 
 # JSON Mode Configuration
 USE_JSON_MODE = True  # Force JSON output via LiteLLM

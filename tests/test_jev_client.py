@@ -65,7 +65,7 @@ class TestRequest:
             },
         )
         assert client.generate_structured_output("", {"title": "A"}) == {
-            "関連": True,
+            "関連": 0.9,
             "level": "low",
         }
 

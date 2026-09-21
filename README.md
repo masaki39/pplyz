@@ -97,7 +97,7 @@ reuse `papers.judge.toml` automatically (or pass `--questions FILE`).
 
 | Answer type | Column value |
 | --- | --- |
-| Yes / No | `true` / `false` |
+| Yes / No | probability of "yes" (0–1), e.g. `0.93` — filter with any threshold later |
 | Pick one of several options | the chosen option |
 | Rate on a scale | the chosen level |
 
@@ -108,7 +108,8 @@ reuse `papers.judge.toml` automatically (or pass `--questions FILE`).
 | `-p, --preview` | Show results for a few rows without writing. |
 | `-f, --force` | Reprocess all rows (resume is default). |
 | `-m, --model` | Jev model on OpenRouter (default: `typesafe/jev-1.13`, or `jev_model` in config). |
-| `--with-confidence` | Also write `<column>_confidence` columns (0–1). |
+| `-w, --workers` | Rows processed in parallel (default: `8`). |
+| `--with-probability` | Also write `<column>_p` (probability of the chosen label) for choice/scale questions. |
 | `--endpoint` | Decisions endpoint URL (default: OpenRouter's alpha endpoint). |
 
 ## Configuration

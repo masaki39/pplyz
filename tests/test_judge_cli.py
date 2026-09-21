@@ -17,7 +17,6 @@ def setup_env(monkeypatch):
     monkeypatch.setattr("pplyz.cli.load_runtime_configuration", lambda: None)
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
     monkeypatch.delenv("PPLYZ_DEFAULT_INPUT", raising=False)
-    monkeypatch.setattr("pplyz.jev_client.REQUEST_DELAY", 0)
 
 
 @pytest.fixture
@@ -30,7 +29,11 @@ def fake_jev(monkeypatch):
         return {
             "answers": {
                 "q1": {"type": "noul", "noul": 0.9},
-                "q2": {"type": "choice", "choice": "low", "confidence": 0.6},
+                "q2": {
+                    "type": "choice",
+                    "choice": "low",
+                    "probabilities": {"high": 0.4, "low": 0.6},
+                },
             }
         }
 
@@ -56,25 +59,31 @@ def _run(args):
         main()
 
 
-def test_judge_uses_saved_questions(sample_csv_file, fake_jev, monkeypatch):
+@pytest.mark.parametrize("workers", ["1", "4"])
+def test_judge_uses_saved_questions(sample_csv_file, fake_jev, monkeypatch, workers):
     monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
     _save_questions(sample_csv_file)
 
-    _run(["judge", str(sample_csv_file), "--with-confidence"])
+    _run(["judge", str(sample_csv_file), "--with-probability", "-w", workers])
 
     df = pd.read_csv(sample_csv_file)
-    assert df["is_relevant"].tolist() == [True, True, True]
+    assert df["is_relevant"].tolist() == [0.9, 0.9, 0.9]
     assert df["level"].tolist() == ["low", "low", "low"]
-    assert df["level_confidence"].tolist() == [0.6, 0.6, 0.6]
-    assert fake_jev[0]["state"] == {"title": "Study of miRNA in cancer"}
+    assert df["level_p"].tolist() == [0.6, 0.6, 0.6]
+    assert sorted(body["state"]["title"] for body in fake_jev) == sorted(
+        df["title"].tolist()
+    )
 
 
-def test_judge_resume_skips_processed_rows(sample_csv_file, fake_jev, monkeypatch):
+@pytest.mark.parametrize("workers", ["1", "4"])
+def test_judge_resume_skips_processed_rows(
+    sample_csv_file, fake_jev, monkeypatch, workers
+):
     monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
     _save_questions(sample_csv_file)
 
-    _run(["judge", str(sample_csv_file)])
-    _run(["judge", str(sample_csv_file)])
+    _run(["judge", str(sample_csv_file), "-w", workers])
+    _run(["judge", str(sample_csv_file), "-w", workers])
 
     assert len(fake_jev) == 3
 

@@ -45,19 +45,33 @@ class TestQuestion:
 
 
 class TestOutputValues:
-    def test_yes_no_threshold_and_confidence(self):
+    def test_yes_no_is_raw_probability(self):
         q = Question("rel", "Relevant?")
-        assert judge.output_values(q, {"noul": 0.8}) == {"rel": True}
-        values = judge.output_values(q, {"noul": 0.2}, with_confidence=True)
-        assert values["rel"] is False
-        assert values["rel_confidence"] == pytest.approx(0.8)
+        assert judge.output_values(q, {"noul": 0.83}) == {"rel": 0.83}
+        # No extra column for yes/no: the value already is the probability.
+        assert judge.output_values(q, {"noul": 0.2}, with_probability=True) == {
+            "rel": 0.2
+        }
 
-    def test_choice(self):
+    def test_choice_with_probability(self):
+        q = Question("level", "Level?", CHOICE, ["high", "low"])
+        answer = {
+            "choice": "low",
+            "probabilities": {"high": 0.25, "low": 0.75},
+            "confidence": 0.9,
+        }
+        assert judge.output_values(q, answer) == {"level": "low"}
+        assert judge.output_values(q, answer, with_probability=True) == {
+            "level": "low",
+            "level_p": 0.75,
+        }
+
+    def test_probability_falls_back_to_confidence(self):
         q = Question("level", "Level?", CHOICE, ["high", "low"])
         values = judge.output_values(
-            q, {"choice": "low", "confidence": 0.9}, with_confidence=True
+            q, {"choice": "low", "confidence": 0.6}, with_probability=True
         )
-        assert values == {"level": "low", "level_confidence": 0.9}
+        assert values["level_p"] == 0.6
 
     def test_choice_unknown_option(self):
         q = Question("level", "Level?", CHOICE, ["high", "low"])
@@ -66,7 +80,11 @@ class TestOutputValues:
 
     def test_scale_maps_index_to_label(self):
         q = Question("s", "Score?", SCALE, ["low", "mid", "high"])
-        assert judge.output_values(q, {"score": 2}) == {"s": "high"}
+        answer = {"score": 2, "probabilities": {"0": 0.1, "1": 0.2, "2": 0.7}}
+        assert judge.output_values(q, answer, with_probability=True) == {
+            "s": "high",
+            "s_p": 0.7,
+        }
 
     def test_scale_out_of_range(self):
         q = Question("s", "Score?", SCALE, ["low", "high"])
@@ -78,11 +96,10 @@ class TestOutputValues:
             Question("rel", "?"),
             Question("level", "?", CHOICE, ["a", "b"]),
         ]
-        assert judge.output_fields(questions, with_confidence=True) == {
-            "rel": bool,
-            "rel_confidence": float,
+        assert judge.output_fields(questions, with_probability=True) == {
+            "rel": float,
             "level": str,
-            "level_confidence": float,
+            "level_p": float,
         }
 
 

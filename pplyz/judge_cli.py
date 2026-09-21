@@ -20,7 +20,11 @@ except ImportError:  # pragma: no cover - optional dependency
     Completion = None
 
 from pplyz.cli import CompactHelpFormatter, resolve_input_path, resolve_preview_rows
-from pplyz.config import DEFAULT_INPUT_COLUMNS_ENV_VAR, get_default_jev_model
+from pplyz.config import (
+    DEFAULT_INPUT_COLUMNS_ENV_VAR,
+    DEFAULT_JEV_WORKERS,
+    get_default_jev_model,
+)
 from pplyz.jev_client import JevClient
 from pplyz.judge import (
     JudgeDefinition,
@@ -95,20 +99,54 @@ def parse_judge_arguments(argv: List[str]) -> argparse.Namespace:
         help="Decisions endpoint URL (default: OpenRouter's alpha endpoint)",
     )
     parser.add_argument(
-        "--with-confidence",
+        "--with-probability",
         action="store_true",
-        help="Also write <column>_confidence columns (0-1)",
+        help="Also write <column>_p (probability of the chosen label) for choice/scale",
+    )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=_positive_int,
+        default=DEFAULT_JEV_WORKERS,
+        help=f"Rows processed in parallel (default: {DEFAULT_JEV_WORKERS})",
     )
     return parser.parse_args(argv)
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return number
 
 
 def _is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+_prompt_session = None
+
+
+def _read_line(prompt: str, completer=None) -> str:
+    """Read one line with full line editing when attached to a terminal.
+
+    Plain ``input()`` leaves editing to the terminal driver, where Backspace
+    breaks multi-byte (e.g. Japanese) characters and arrow keys print escape
+    codes. prompt_toolkit handles both; tests and pipes fall back to ``input()``.
+    """
+    global _prompt_session
+    if PromptSession is None or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return input(prompt)
+    if _prompt_session is None:
+        _prompt_session = PromptSession()
+    return _prompt_session.prompt(
+        prompt, completer=completer, complete_while_typing=completer is not None
+    )
+
+
 def _confirm(message: str, default: bool = True) -> bool:
     suffix = "[Y/n]" if default else "[y/N]"
-    answer = input(f"{message} {suffix}: ").strip().lower()
+    answer = _read_line(f"{message} {suffix}: ").strip().lower()
     if not answer:
         return default
     return answer in ("y", "yes")
@@ -137,16 +175,6 @@ class ColumnCompleter(Completer):
             yield Completion(col, start_position=-len(token))
 
 
-def _read_columns_line(available: List[str]) -> str:
-    prompt = "Which columns should Jev read? (comma-separated, Tab to complete): "
-    if PromptSession is None or not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return input(prompt)
-    session = PromptSession(
-        completer=ColumnCompleter(available), complete_while_typing=True
-    )
-    return session.prompt(prompt)
-
-
 def _ask_input_columns(available: List[str]) -> List[str]:
     print(f"\nColumns in the CSV ({len(available)}):")
     print("  " + ", ".join(available[:MAX_LISTED_COLUMNS]))
@@ -154,7 +182,10 @@ def _ask_input_columns(available: List[str]) -> List[str]:
         hidden = len(available) - MAX_LISTED_COLUMNS
         print(f"  ... and {hidden} more (type any part of a name and press Tab)")
     while True:
-        raw = _read_columns_line(available)
+        raw = _read_line(
+            "Which columns should Jev read? (comma-separated, Tab to complete): ",
+            completer=ColumnCompleter(available),
+        )
         columns = [col.strip() for col in raw.split(",") if col.strip()]
         missing = [col for col in columns if col not in available]
         if columns and not missing:
@@ -195,7 +226,7 @@ def _resolve_definition(
     input_columns = _split_columns(args.input_columns) or _ask_input_columns(
         csv_columns
     )
-    questions = run_wizard(reserved_columns=csv_columns)
+    questions = run_wizard(reserved_columns=csv_columns, ask=_read_line)
     definition = JudgeDefinition(questions=questions, input_columns=input_columns)
     save_definition(definition, path)
     print(f"\n→ Saved questions to {path} (edit it or rerun to reuse)")
@@ -237,7 +268,7 @@ def judge_main(argv: List[str]) -> None:
 
     questions = definition.questions
     response_model = create_output_model(
-        output_fields(questions, args.with_confidence), "JudgeOutput"
+        output_fields(questions, args.with_probability), "JudgeOutput"
     )
     summary = "Jev questions: " + summarize(questions)
 
@@ -246,7 +277,7 @@ def judge_main(argv: List[str]) -> None:
             questions,
             model_name=args.model,
             endpoint=args.endpoint,
-            with_confidence=args.with_confidence,
+            with_probability=args.with_probability,
         )
     except ValueError as exc:
         logger.error("Jev client initialization failed: %s", exc)
@@ -277,6 +308,7 @@ def judge_main(argv: List[str]) -> None:
             prompt=summary,
             response_model=response_model,
             resume=args.resume,
+            workers=args.workers,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")

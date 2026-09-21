@@ -39,7 +39,13 @@ so `JevClient` calls it directly with `urllib` and implements the same
   `<csv stem>.judge.toml` next to the CSV; later runs reuse it.
 - Question ids sent to the API are positional (`q1`, `q2`, …) so column names may
   contain spaces or non-ASCII.
-- `yes_no` → bool via 0.5 threshold; `scale` score is a 0-based index into levels.
+- `yes_no` → the raw probability of "yes" (float); thresholding is left to the user.
+  `--with-probability` adds `<col>_p` (probability of the chosen label) for
+  choice/scale. `scale` score is a 0-based index into levels.
+- `pplyz judge` runs rows in parallel (`--workers`, default 8) through
+  `CSVProcessor._process_rows_parallel`; `JevClient` has no fixed request delay
+  (429s are retried) and checkpoints are written every `CHECKPOINT_INTERVAL` seconds.
+  The LiteLLM mode stays sequential (see Design Decision 1).
 
 ### API keys in the Keychain
 

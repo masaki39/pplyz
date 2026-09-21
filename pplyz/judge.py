@@ -28,7 +28,7 @@ _JEV_TYPES = {YES_NO: "noul", CHOICE: "choice", SCALE: "score"}
 MAX_CHOICE_OPTIONS = 255
 MIN_SCALE_LEVELS = 2
 MAX_SCALE_LEVELS = 10
-CONFIDENCE_SUFFIX = "_confidence"
+PROBABILITY_SUFFIX = "_p"
 QUESTIONS_FILE_SUFFIX = ".judge.toml"
 
 
@@ -87,7 +87,7 @@ class Question:
     def describe(self) -> str:
         """Short human-readable summary, e.g. ``level (high|mid|low)``."""
         if self.answer == YES_NO:
-            return f"{self.column} (yes/no)"
+            return f"{self.column} (yes/no probability)"
         separator = " < " if self.answer == SCALE else "|"
         return f"{self.column} ({separator.join(self.options)})"
 
@@ -105,19 +105,27 @@ def validate_questions(questions: List[Question]) -> None:
 
 
 def output_fields(
-    questions: List[Question], with_confidence: bool = False
+    questions: List[Question], with_probability: bool = False
 ) -> Dict[str, Type]:
-    """Return output column names and types, in question order."""
+    """Return output column names and types, in question order.
+
+    Yes/no columns hold the probability of "yes" (0-1). Choice and scale columns
+    hold the chosen label; ``with_probability`` adds ``<column>_p`` with the
+    probability of that label.
+    """
     fields: Dict[str, Type] = {}
     for question in questions:
-        fields[question.column] = bool if question.answer == YES_NO else str
-        if with_confidence:
-            fields[question.column + CONFIDENCE_SUFFIX] = float
+        if question.answer == YES_NO:
+            fields[question.column] = float
+            continue
+        fields[question.column] = str
+        if with_probability:
+            fields[question.column + PROBABILITY_SUFFIX] = float
     return fields
 
 
 def output_values(
-    question: Question, answer: Dict[str, Any], with_confidence: bool = False
+    question: Question, answer: Dict[str, Any], with_probability: bool = False
 ) -> Dict[str, Any]:
     """Convert one Jev answer into column values.
 
@@ -126,29 +134,30 @@ def output_values(
     """
     try:
         if question.answer == YES_NO:
-            probability = float(answer["noul"])
-            value: Any = probability >= 0.5
-            confidence = max(probability, 1.0 - probability)
-        elif question.answer == CHOICE:
+            return {question.column: float(answer["noul"])}
+        if question.answer == CHOICE:
             value = answer["choice"]
             if value not in question.options:
                 raise ValueError(f"unexpected option '{value}'")
-            confidence = answer.get("confidence")
+            key = value
         else:
             index = int(answer["score"])
             if not 0 <= index < len(question.options):
                 raise ValueError(f"score {index} out of range")
             value = question.options[index]
-            confidence = answer.get("confidence")
+            key = str(index)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(
             f"Invalid Jev answer for '{question.column}': {exc} ({answer})"
         ) from exc
 
-    values = {question.column: value}
-    if with_confidence:
-        values[question.column + CONFIDENCE_SUFFIX] = (
-            None if confidence is None else float(confidence)
+    values: Dict[str, Any] = {question.column: value}
+    if with_probability:
+        probability = (answer.get("probabilities") or {}).get(key)
+        if probability is None:
+            probability = answer.get("confidence")
+        values[question.column + PROBABILITY_SUFFIX] = (
+            None if probability is None else float(probability)
         )
     return values
 
@@ -241,7 +250,7 @@ def save_definition(definition: JudgeDefinition, path: Path) -> None:
 
 
 _ANSWER_MENU = (
-    (YES_NO, "Yes / No"),
+    (YES_NO, "Yes / No (saved as the probability of yes, 0-1)"),
     (CHOICE, "Pick one of several options"),
     (SCALE, "Rate on a scale (lowest -> highest)"),
 )
