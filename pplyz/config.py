@@ -9,7 +9,14 @@ DEFAULT_INPUT_COLUMNS_ENV_VAR = "PPLYZ_DEFAULT_INPUT"
 DEFAULT_OUTPUT_FIELDS_ENV_VAR = "PPLYZ_DEFAULT_OUTPUT"
 PREVIEW_ROWS_ENV_VAR = "PPLYZ_PREVIEW_ROWS"
 DEFAULT_PREVIEW_ROWS = 3
-DEFAULT_MODEL_FALLBACK = "gemini/gemini-2.5-flash-lite"
+DEFAULT_MODEL_FALLBACK = "openrouter/google/gemini-2.5-flash-lite"
+
+# Jev (TypeSafe's decision-only model) via OpenRouter's decisions endpoint
+JEV_MODEL_ENV_VAR = "PPLYZ_JEV_MODEL"
+DEFAULT_JEV_MODEL_FALLBACK = "typesafe/jev-1.13"
+DEFAULT_JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+JEV_API_KEY_ENV_VARS = ["OPENROUTER_API_KEY"]
+JEV_REQUEST_TIMEOUT = 60  # seconds
 
 
 API_BASE_ENV_VAR = "PPLYZ_API_BASE"
@@ -19,6 +26,11 @@ OLLAMA_API_BASE_ENV_VAR = "OLLAMA_API_BASE"
 def get_default_model() -> str:
     """Return the default model, allowing override via environment variable."""
     return os.getenv(DEFAULT_MODEL_ENV_VAR, DEFAULT_MODEL_FALLBACK)
+
+
+def get_default_jev_model() -> str:
+    """Return the default Jev model, allowing override via environment variable."""
+    return os.getenv(JEV_MODEL_ENV_VAR, DEFAULT_JEV_MODEL_FALLBACK)
 
 
 def get_default_api_base() -> str | None:

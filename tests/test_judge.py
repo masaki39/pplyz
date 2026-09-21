@@ -1,0 +1,159 @@
+"""Tests for pplyz.judge question definitions."""
+
+import pytest
+
+from pplyz import judge
+from pplyz.judge import CHOICE, SCALE, YES_NO, JudgeDefinition, Question
+
+
+class TestQuestion:
+    def test_yes_no_to_jev(self):
+        q = Question(column="is_rel", ask="Relevant?")
+        assert q.to_jev() == {"type": "noul", "instructions": "Relevant?"}
+
+    def test_choice_to_jev(self):
+        q = Question("level", "Level?", CHOICE, ["high", "low"])
+        assert q.to_jev() == {
+            "type": "choice",
+            "instructions": "Level?",
+            "criteria": {"high": "high", "low": "low"},
+        }
+
+    def test_scale_to_jev_keeps_order(self):
+        q = Question("s", "Score?", SCALE, ["low", "mid", "high"])
+        assert q.to_jev()["criteria"] == ["low", "mid", "high"]
+        assert q.to_jev()["type"] == "score"
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            Question("", "x"),
+            Question("c", ""),
+            Question("c", "x", "maybe"),
+            Question("c", "x", CHOICE, ["only"]),
+            Question("c", "x", CHOICE, ["a", "a"]),
+            Question("c", "x", SCALE, [str(i) for i in range(11)]),
+        ],
+    )
+    def test_invalid_questions(self, question):
+        with pytest.raises(ValueError):
+            question.validate()
+
+    def test_duplicate_columns_rejected(self):
+        with pytest.raises(ValueError, match="Duplicate"):
+            judge.validate_questions([Question("a", "x"), Question("a", "y")])
+
+
+class TestOutputValues:
+    def test_yes_no_threshold_and_confidence(self):
+        q = Question("rel", "Relevant?")
+        assert judge.output_values(q, {"noul": 0.8}) == {"rel": True}
+        values = judge.output_values(q, {"noul": 0.2}, with_confidence=True)
+        assert values["rel"] is False
+        assert values["rel_confidence"] == pytest.approx(0.8)
+
+    def test_choice(self):
+        q = Question("level", "Level?", CHOICE, ["high", "low"])
+        values = judge.output_values(
+            q, {"choice": "low", "confidence": 0.9}, with_confidence=True
+        )
+        assert values == {"level": "low", "level_confidence": 0.9}
+
+    def test_choice_unknown_option(self):
+        q = Question("level", "Level?", CHOICE, ["high", "low"])
+        with pytest.raises(ValueError, match="unexpected option"):
+            judge.output_values(q, {"choice": "other"})
+
+    def test_scale_maps_index_to_label(self):
+        q = Question("s", "Score?", SCALE, ["low", "mid", "high"])
+        assert judge.output_values(q, {"score": 2}) == {"s": "high"}
+
+    def test_scale_out_of_range(self):
+        q = Question("s", "Score?", SCALE, ["low", "high"])
+        with pytest.raises(ValueError):
+            judge.output_values(q, {"score": 5})
+
+    def test_output_fields(self):
+        questions = [
+            Question("rel", "?"),
+            Question("level", "?", CHOICE, ["a", "b"]),
+        ]
+        assert judge.output_fields(questions, with_confidence=True) == {
+            "rel": bool,
+            "rel_confidence": float,
+            "level": str,
+            "level_confidence": float,
+        }
+
+
+class TestDefinitionFile:
+    def test_round_trip(self, tmp_path):
+        definition = JudgeDefinition(
+            questions=[
+                Question("関連", 'DISH研究に "関連" するか？\n改行'),
+                Question("level", "Level?", SCALE, ["低", "中", "高"]),
+            ],
+            input_columns=["title", "abstract"],
+        )
+        path = tmp_path / "data.judge.toml"
+        judge.save_definition(definition, path)
+
+        loaded = judge.load_definition(path)
+
+        assert loaded == definition
+
+    def test_invalid_file(self, tmp_path):
+        path = tmp_path / "q.toml"
+        path.write_text('[[questions]]\ncolumn = "a"\nask = ""\n')
+        with pytest.raises(ValueError):
+            judge.load_definition(path)
+
+    def test_default_path_is_next_to_csv(self, tmp_path):
+        csv_path = tmp_path / "papers.csv"
+        assert judge.default_questions_path(csv_path) == tmp_path / "papers.judge.toml"
+
+
+class TestWizard:
+    def _run(self, answers, reserved=()):
+        replies = iter(answers)
+        output = []
+        questions = judge.run_wizard(
+            reserved_columns=reserved,
+            ask=lambda _prompt: next(replies),
+            say=output.append,
+        )
+        return questions, output
+
+    def test_builds_all_answer_types(self):
+        questions, _ = self._run(
+            [
+                "Is it relevant?",
+                "1",
+                "is_relevant",
+                "y",
+                "Which topic?",
+                "2",
+                "a|b|c",
+                "",
+                "y",
+                "How strong?",
+                "3",
+                "low|high",
+                "strength",
+                "n",
+            ]
+        )
+        assert questions == [
+            Question("is_relevant", "Is it relevant?", YES_NO, []),
+            Question("q2", "Which topic?", CHOICE, ["a", "b", "c"]),
+            Question("strength", "How strong?", SCALE, ["low", "high"]),
+        ]
+
+    def test_reprompts_on_invalid_input(self):
+        questions, output = self._run(
+            ["", "Relevant?", "9", "2", "only", "x|x", "a|b", "title", "ok", ""],
+            reserved=["title"],
+        )
+        assert questions == [Question("ok", "Relevant?", CHOICE, ["a", "b"])]
+        assert any("already used" in line for line in output)
+        assert any("unique" in line for line in output)

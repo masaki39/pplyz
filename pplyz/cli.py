@@ -16,6 +16,12 @@ from pplyz.config import (
     get_default_api_base,
     get_default_model,
 )
+from pplyz.keychain import (
+    KEYCHAIN_PREFIX,
+    KEYCHAIN_SERVICE,
+    SecretResolutionError,
+    store_keychain,
+)
 from pplyz.llm_client import LLMClient
 from pplyz.processor import CSVProcessor
 from pplyz.schemas import create_output_model_from_string
@@ -70,6 +76,11 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         usage="pplyz [INPUT] [options]",
         formatter_class=CompactHelpFormatter,
+        epilog=(
+            "Subcommands:\n"
+            "  pplyz judge INPUT   Fast yes/no, choice and scale decisions with Jev\n"
+            "  pplyz auth set NAME Store an API key in the macOS Keychain"
+        ),
     )
 
     parser.add_argument(
@@ -307,10 +318,77 @@ def _build_prompt_session():
     )
 
 
+def resolve_input_path(raw_path: str) -> Path:
+    """Resolve and validate the input CSV path, exiting on error."""
+    input_path = Path(raw_path)
+    if not input_path.is_absolute():
+        # Try relative to DATA_DIR first
+        data_path = DATA_DIR / input_path
+        if data_path.exists():
+            input_path = data_path
+        else:
+            # Use as relative to current directory
+            input_path = input_path.resolve()
+
+    if not input_path.exists():
+        print(f"Error: Input file not found: {input_path}")
+        sys.exit(1)
+
+    if input_path.is_dir():
+        print(f"Error: Input path must be a CSV file, not a directory: {input_path}")
+        sys.exit(1)
+
+    if input_path.suffix.lower() != ".csv":
+        print(f"Error: Input file must have a .csv extension: {input_path}")
+        sys.exit(1)
+
+    return input_path
+
+
+def auth_main(argv: list[str]) -> None:
+    """Store an API key in the macOS Keychain (`pplyz auth set <name>`)."""
+    parser = argparse.ArgumentParser(
+        prog="pplyz auth",
+        description="Store API keys in the macOS Keychain instead of config files.",
+    )
+    sub = parser.add_subparsers(dest="action", required=True)
+    set_parser = sub.add_parser("set", help="Store (or replace) a key")
+    set_parser.add_argument(
+        "name", help="Key name, usually the provider (e.g. openrouter)"
+    )
+    args = parser.parse_args(argv)
+
+    name = args.name.strip()
+    print(f"Enter the API key for '{name}' (input is hidden).")
+    try:
+        store_keychain(name)
+    except SecretResolutionError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    env_vars = API_KEY_ENV_VARS.get(name)
+    env_var = env_vars[0] if env_vars else "<PROVIDER>_API_KEY"
+    config_path = determine_config_dir() / "config.toml"
+    print(f"✓ Stored in Keychain (service={KEYCHAIN_SERVICE}, account={name}).")
+    print(f"Reference it from the [env] table of {config_path}:")
+    print("\n  [env]")
+    print(f'  {env_var} = "{KEYCHAIN_PREFIX}{name}"\n')
+
+
 def main() -> None:
     """Main entry point for the LLM Analyser CLI."""
     # Load environment/configuration files
     load_runtime_configuration()
+
+    subcommand = sys.argv[1] if len(sys.argv) > 1 else None
+    if subcommand == "judge":
+        from pplyz.judge_cli import judge_main
+
+        judge_main(sys.argv[2:])
+        return
+    if subcommand == "auth":
+        auth_main(sys.argv[2:])
+        return
 
     # Parse arguments
     args = parse_arguments()
@@ -345,28 +423,7 @@ def main() -> None:
         print("Error: At least one column must be specified")
         sys.exit(1)
 
-    # Resolve input path
-    input_path = Path(resolved_input)
-    if not input_path.is_absolute():
-        # Try relative to DATA_DIR first
-        data_path = DATA_DIR / input_path
-        if data_path.exists():
-            input_path = data_path
-        else:
-            # Use as relative to current directory
-            input_path = input_path.resolve()
-
-    if not input_path.exists():
-        print(f"Error: Input file not found: {input_path}")
-        sys.exit(1)
-
-    if input_path.is_dir():
-        print(f"Error: Input path must be a CSV file, not a directory: {input_path}")
-        sys.exit(1)
-
-    if input_path.suffix.lower() != ".csv":
-        print(f"Error: Input file must have a .csv extension: {input_path}")
-        sys.exit(1)
+    input_path = resolve_input_path(resolved_input)
 
     # Get user prompt (inline/file/interactive)
     prompt = get_prompt_from_args(args)

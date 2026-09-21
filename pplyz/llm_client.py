@@ -27,6 +27,7 @@ from .config import (
     get_default_api_base,
     get_default_model,
 )
+from .keychain import resolve_env_secrets
 from .utils import format_error_message
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,7 @@ class LLMClient:
         if api_key:
             self._set_api_key(api_key)
         else:
+            resolve_env_secrets(API_KEY_ENV_VARS.get(self.provider, []))
             self._verify_api_key()
 
     def _silence_litellm_logs(self) -> None:

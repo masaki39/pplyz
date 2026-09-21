@@ -2,7 +2,11 @@
 
 [env]
 # Override default model (optional)
-PPLYZ_DEFAULT_MODEL = "gemini/gemini-2.5-flash-lite"
+PPLYZ_DEFAULT_MODEL = "openrouter/google/gemini-2.5-flash-lite"
+
+# Prefer Keychain references over plain-text keys (macOS):
+#   pplyz auth set openrouter
+# OPENROUTER_API_KEY = "keychain:openrouter"
 
 # Gemini API Key
 GEMINI_API_KEY = "your-gemini-api-key-here"
@@ -67,7 +71,8 @@ DATABRICKS_TOKEN = "your-databricks-token-here"
 
 [pplyz]
 # You can also set pplyz-specific defaults here
-default_model = "gemini/gemini-2.5-flash-lite"
+default_model = "openrouter/google/gemini-2.5-flash-lite"
+# jev_model = "typesafe/jev-1.13"  # model used by `pplyz judge`
 default_input = "title,abstract"
 default_output = "include:bool,summary:str"
 preview_rows = 5  # Number of rows shown when running with --preview

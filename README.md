@@ -9,7 +9,7 @@ Add LLM-generated columns to a CSV with one command.
 ## Requirements
 
 - [uv](https://github.com/astral-sh/uv) (Recommended)
-- At least one LiteLLM-compatible API key (OpenAI, Gemini, Anthropic, etc.), **or** a local [Ollama](https://ollama.com/) server (no API key needed)
+- An [OpenRouter](https://openrouter.ai/) API key (recommended — one key covers the default model and `pplyz judge`), any other LiteLLM-compatible API key (OpenAI, Gemini, Anthropic, etc.), **or** a local [Ollama](https://ollama.com/) server (no API key needed)
 
 uv is the easiest way to run the CLI.
 
@@ -58,6 +58,59 @@ pplyz -h
 | `--prompt` | Inline prompt text (skips interactive prompt entry). | No |
 | `--prompt-file` | Path to a prompt text file (skips interactive prompt entry). | No |
 
+## Yes/no, choice and scale decisions with Jev (`pplyz judge`)
+
+`pplyz judge` asks [Jev](https://openrouter.ai/typesafe) — TypeSafe's decision-only model —
+the same questions about every row. Jev never writes text, so answers are always one of
+the allowed values, and it is much faster and cheaper than a chat LLM. It uses your
+`OPENROUTER_API_KEY`.
+
+```bash
+pplyz judge papers.csv
+```
+
+The first run walks you through the questions — no special syntax needed:
+
+```
+Columns in the CSV:
+  title, abstract, year
+Which columns should Jev read? (comma-separated): title,abstract
+
+Question 1: What should be judged for each row?
+> Is this paper about cancer research?
+How should it be answered?
+  1) Yes / No
+  2) Pick one of several options
+  3) Rate on a scale (lowest -> highest)
+Choose [1]: 1
+Output column name [q1]: is_cancer
+Add another question? [y/N]: n
+
+→ Saved questions to papers.judge.toml (edit it or rerun to reuse)
+```
+
+When picking columns, press Tab to complete names — typing any part of a name finds it,
+which helps with wide CSVs.
+
+pplyz then previews a few rows and asks before processing the whole file. Later runs
+reuse `papers.judge.toml` automatically (or pass `--questions FILE`).
+
+| Answer type | Column value |
+| --- | --- |
+| Yes / No | `true` / `false` |
+| Pick one of several options | the chosen option |
+| Rate on a scale | the chosen level |
+
+| Flag | Description |
+| --- | --- |
+| `-i, --input` | Columns shown to Jev (asked interactively if omitted). |
+| `-q, --questions` | Questions file (default: `<csv name>.judge.toml` next to the CSV). |
+| `-p, --preview` | Show results for a few rows without writing. |
+| `-f, --force` | Reprocess all rows (resume is default). |
+| `-m, --model` | Jev model on OpenRouter (default: `typesafe/jev-1.13`, or `jev_model` in config). |
+| `--with-confidence` | Also write `<column>_confidence` columns (0–1). |
+| `--endpoint` | Decisions endpoint URL (default: OpenRouter's alpha endpoint). |
+
 ## Configuration
 
 1. Create the user config once:
@@ -73,14 +126,33 @@ On Windows, use `%APPDATA%\\pplyz\\config.toml`.
 
 ```toml
 [env]
-OPENAI_API_KEY = "sk-..."
-GROQ_API_KEY = "gsk-..."
+OPENROUTER_API_KEY = "keychain:openrouter"   # read from the macOS Keychain
+OPENAI_API_KEY = "sk-..."                    # or plain text (not recommended)
 
 [pplyz]
-default_model = "openai/gpt-4o-mini"
+default_model = "openrouter/openai/gpt-4o-mini"
 default_input = "title,abstract"
 default_output = "relevant:bool,summary:str"
 ```
+
+### Keeping API keys out of config files (macOS Keychain)
+
+Store the key once — the input is hidden and never lands in shell history:
+
+```bash
+pplyz auth set openrouter
+```
+
+Then reference it instead of pasting the key:
+
+```toml
+[env]
+OPENROUTER_API_KEY = "keychain:openrouter"
+```
+
+`keychain:<name>` reads the generic password with service `pplyz` and account `<name>`;
+`keychain:<service>/<account>` reads any other Keychain item. The same syntax works in
+environment variables. Keys are only read for the provider actually used.
 
 ### Settings priority
 
@@ -101,6 +173,7 @@ Set these inside the `[env]` table of your `config.toml`
 | Provider | Keys (checked in order) |
 | --- | --- |
 | Gemini | `GEMINI_API_KEY` |
+| OpenRouter (also `pplyz judge`) | `OPENROUTER_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Anthropic / Claude | `ANTHROPIC_API_KEY` |
 | Groq | `GROQ_API_KEY` |
@@ -121,7 +194,8 @@ Set these inside the `[env]` table of your `config.toml`
 
 | key | description | default |
 | --- | --- | --- |
-| `default_model` | Sets the fallback LiteLLM model when `--model` is omitted. | `gemini/gemini-2.5-flash-lite` |
+| `default_model` | Sets the fallback LiteLLM model when `--model` is omitted. | `openrouter/google/gemini-2.5-flash-lite` |
+| `jev_model` | Jev model used by `pplyz judge` (same as `PPLYZ_JEV_MODEL`). | `typesafe/jev-1.13` |
 | `default_input` | Comma-separated columns used when `-i/--input` is omitted. | unset |
 | `default_output` | Output schema used when `-o/--output` is omitted. | unset |
 | `default_api_base` | Base URL passed to the provider (same as `--api-base` / `PPLYZ_API_BASE`). | unset |
