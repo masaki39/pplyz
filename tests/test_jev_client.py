@@ -146,3 +146,19 @@ class TestErrors:
         with pytest.raises(JevCancelled):
             client._post_with_retry({})
         assert len(calls) == 1
+
+
+class TestErrorClassification:
+    def test_moderation_403_is_a_row_error(self, client, monkeypatch):
+        def fake_urlopen(*args, **kwargs):
+            raise _http_error(403, b'{"error":"Input was flagged by moderation"}')
+
+        monkeypatch.setattr(jev_client.urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(JevRequestError) as info:
+            client._post({})
+        assert not isinstance(info.value, JevFatalError)
+        assert info.value.status == 403
+
+    def test_retry_after_is_capped(self):
+        assert jev_client._parse_retry_after("3600") == jev_client.MAX_RETRY_AFTER
+        assert jev_client._parse_retry_after("soon") is None

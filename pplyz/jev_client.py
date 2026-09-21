@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -42,6 +43,10 @@ FATAL_STATUS_HINTS = {
     "https://openrouter.ai/settings/credits.",
     403: "OpenRouter denied access to Jev with this API key.",
 }
+
+
+# Upper bound for a server-requested Retry-After, in seconds.
+MAX_RETRY_AFTER = 60.0
 
 
 class JevRequestError(RuntimeError):
@@ -142,6 +147,9 @@ class JevClient:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             hint = FATAL_STATUS_HINTS.get(exc.code)
+            if exc.code == 403 and re.search(r"moderat|flagged", detail, re.I):
+                # Moderation rejects a single row's content, not the whole run.
+                hint = None
             if hint:
                 raise JevFatalError(f"{hint} (HTTP {exc.code}: {detail})") from exc
             raise JevRequestError(
@@ -212,7 +220,7 @@ class JevClient:
 def _parse_retry_after(value: str | None) -> float | None:
     """Parse a Retry-After header given in seconds (HTTP-date is ignored)."""
     try:
-        return max(0.0, float(value)) if value else None
+        return min(MAX_RETRY_AFTER, max(0.0, float(value))) if value else None
     except ValueError:
         return None
 

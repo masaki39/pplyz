@@ -144,7 +144,7 @@ class TestDefinitionFile:
             "maybe",
         ]
 
-    def test_record_completed_run_keeps_user_edits(self, tmp_path):
+    def test_record_last_run_keeps_user_edits(self, tmp_path):
         path = tmp_path / "q.toml"
         path.write_text(
             '# my notes\ninput = ["title"]\n\n[[questions]]\n'
@@ -152,21 +152,27 @@ class TestDefinitionFile:
         )
         definition = judge.load_definition(path)
         assert definition.last_run_fingerprint is None
-        assert not definition.changed_since_last_run()
+        assert not definition.matches_last_run(["title"])
 
-        judge.record_completed_run(definition, path)
+        judge.record_last_run(definition, path, ["title"])
+        judge.record_written_columns(definition, path, ["a"])
 
         text = path.read_text()
         assert "# keep me" in text
         reloaded = judge.load_definition(path)
-        assert reloaded.last_run_fingerprint == definition.fingerprint()
-        assert not reloaded.changed_since_last_run()
+        assert reloaded.matches_last_run(["title"])
+        # Different input columns mean different answers.
+        assert not reloaded.matches_last_run(["title", "abstract"])
+        assert reloaded.written_columns == ["a"]
 
         path.write_text(text.replace('ask = "x"', 'ask = "changed"'))
-        assert judge.load_definition(path).changed_since_last_run()
+        assert not judge.load_definition(path).matches_last_run(["title"])
 
-        judge.record_completed_run(judge.load_definition(path), path)
-        assert path.read_text().count("last_run =") == 1
+        judge.record_last_run(judge.load_definition(path), path, ["title"])
+        judge.record_written_columns(judge.load_definition(path), path, ["a", "b"])
+        text = path.read_text()
+        assert text.count("last_run =") == 1
+        assert 'written = ["a", "b"]' in text
 
     def test_default_path_is_next_to_csv(self, tmp_path):
         csv_path = tmp_path / "papers.csv"

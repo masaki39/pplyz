@@ -48,8 +48,12 @@ so `JevClient` calls it directly with `urllib` and implements the same
   progress and exits with `os._exit(130)` so in-flight requests are not joined.
 - CSVs are read with `read_csv_preserving` (`dtype=str`) because results are written
   back over the input; output columns are cast to `object` on resume.
-- The questions file stores `last_run` (fingerprint of the questions after a completed
-  run); if the questions change, `pplyz judge` offers to recompute answered rows.
+- The questions file stores `last_run` (fingerprint of the questions + input columns
+  behind the answers in the CSV) and `written` (output columns pplyz judge owns).
+  Answers from other/edited questions (including recreated questions reusing a
+  column) prompt a recompute; declining keeps `last_run` stale so the warning
+  repeats. Existing CSV columns not in `written` are never overwritten.
+- 403 is fatal except moderation rejections (row-level). Retry-After is capped at 60s.
 - `pplyz judge` runs rows in parallel (`--workers`, default 8) through
   `CSVProcessor._process_rows_parallel`; `JevClient` has no fixed request delay
   (429s are retried) and checkpoints are written every `CHECKPOINT_INTERVAL` seconds.

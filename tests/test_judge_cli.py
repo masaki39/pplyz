@@ -247,3 +247,65 @@ def test_auth_set_rejects_slash(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         _run(["auth", "set", "a/b"])
     assert "must not contain '/'" in capsys.readouterr().out
+
+
+def test_judge_rejects_overwriting_existing_source_column(
+    sample_csv_file, monkeypatch, capsys
+):
+    """A hand-written `column = "year"` must not overwrite the source data."""
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    path = sample_csv_file.with_name(sample_csv_file.stem + ".judge.toml")
+    save_definition(JudgeDefinition([Question("year", "Recent?")], ["title"]), path)
+    with pytest.raises(SystemExit):
+        _run(["judge", str(sample_csv_file), "-f"])
+    assert "were not written by pplyz judge" in capsys.readouterr().out
+
+
+def test_recreated_questions_reusing_a_column_are_recomputed(
+    sample_csv_file, fake_jev, monkeypatch
+):
+    """Regression: answers from replaced questions must not be silently kept."""
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    _save_questions(sample_csv_file)
+    _run(["judge", str(sample_csv_file)])
+    assert len(fake_jev) == 3
+
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: True)
+    replies = iter(
+        [
+            "n",  # don't reuse saved questions
+            "title",
+            "Relevant now?",
+            "1",
+            "is_relevant",
+            "n",
+            "",
+            "y",  # process all rows after preview
+            "y",  # recompute rows that already have answers
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(replies))
+    monkeypatch.setenv("PPLYZ_PREVIEW_ROWS", "1")
+
+    _run(["judge", str(sample_csv_file)])
+
+    # 1 preview + 3 recomputed rows
+    assert len(fake_jev) == 3 + 4
+    backup = sample_csv_file.with_name(sample_csv_file.stem + ".judge.toml.bak")
+    assert backup.exists()
+
+
+def test_non_interactive_keeps_warning_about_stale_answers(
+    sample_csv_file, fake_jev, monkeypatch, caplog
+):
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    path = _save_questions(sample_csv_file)
+    _run(["judge", str(sample_csv_file)])
+    path.write_text(path.read_text().replace("Relevant?", "Really relevant?"))
+
+    for _ in range(2):
+        caplog.clear()
+        _run(["judge", str(sample_csv_file)])
+        assert "different or edited questions" in caplog.text
+
+    assert len(fake_jev) == 3  # nothing recomputed without consent

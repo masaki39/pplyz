@@ -195,23 +195,23 @@ class JudgeDefinition:
 
     questions: List[Question]
     input_columns: List[str] = field(default_factory=list)
-    # Fingerprint of the questions the CSV was last fully processed with.
+    # Fingerprint of the questions behind the answers currently in the CSV.
     last_run_fingerprint: Optional[str] = None
+    # Output columns pplyz judge has written; only these may be overwritten.
+    written_columns: List[str] = field(default_factory=list)
 
-    def fingerprint(self) -> str:
+    def fingerprint(self, input_columns: Optional[List[str]] = None) -> str:
         """Hash of everything that changes Jev's answers."""
+        columns = self.input_columns if input_columns is None else input_columns
         payload = [[q.column, q.ask, q.answer, q.options] for q in self.questions] + [
-            self.input_columns
+            list(columns)
         ]
         digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
         return digest.hexdigest()[:16]
 
-    def changed_since_last_run(self) -> bool:
-        """True when questions were edited after the last completed run."""
-        return (
-            self.last_run_fingerprint is not None
-            and self.last_run_fingerprint != self.fingerprint()
-        )
+    def matches_last_run(self, input_columns: Optional[List[str]] = None) -> bool:
+        """True when the answers in the CSV came from these exact questions."""
+        return self.last_run_fingerprint == self.fingerprint(input_columns)
 
 
 def _parse_options(raw: Any) -> List[str]:
@@ -257,10 +257,14 @@ def load_definition(path: Path) -> JudgeDefinition:
     if isinstance(input_columns, str):
         input_columns = [col.strip() for col in input_columns.split(",")]
     fingerprint = data.get("last_run")
+    written = data.get("written", [])
     return JudgeDefinition(
         questions=questions,
         input_columns=[str(col) for col in input_columns if str(col).strip()],
         last_run_fingerprint=str(fingerprint) if fingerprint else None,
+        written_columns=[str(col) for col in written]
+        if isinstance(written, list)
+        else [],
     )
 
 
@@ -282,6 +286,8 @@ def dump_definition(definition: JudgeDefinition) -> str:
     ]
     if definition.last_run_fingerprint:
         lines.append(f"last_run = {_toml_string(definition.last_run_fingerprint)}")
+    if definition.written_columns:
+        lines.append(f"written = {_toml_array(definition.written_columns)}")
     if definition.input_columns:
         lines.append(f"input = {_toml_array(definition.input_columns)}")
     for question in definition.questions:
@@ -302,17 +308,13 @@ def save_definition(definition: JudgeDefinition, path: Path) -> None:
     path.write_text(dump_definition(definition), encoding="utf-8")
 
 
-_LAST_RUN_LINE = re.compile(r"^last_run\s*=.*$", re.MULTILINE)
-
-
-def record_completed_run(definition: JudgeDefinition, path: Path) -> None:
-    """Store the fingerprint of a fully processed run, keeping the user's edits."""
-    fingerprint = definition.fingerprint()
-    definition.last_run_fingerprint = fingerprint
-    line = f"last_run = {_toml_string(fingerprint)}"
+def _set_top_level_key(path: Path, key: str, value: str) -> None:
+    """Set a top-level ``key = value`` line in place, keeping the user's edits."""
+    line = f"{key} = {value}"
+    pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
     text = path.read_text(encoding="utf-8")
-    if _LAST_RUN_LINE.search(text):
-        text = _LAST_RUN_LINE.sub(lambda _m: line, text, count=1)
+    if pattern.search(text):
+        text = pattern.sub(lambda _m: line, text, count=1)
     else:
         # Top-level keys must come before the first [[questions]] table.
         lines = text.splitlines()
@@ -323,6 +325,27 @@ def record_completed_run(definition: JudgeDefinition, path: Path) -> None:
         lines.insert(insert_at, line)
         text = "\n".join(lines) + "\n"
     path.write_text(text, encoding="utf-8")
+
+
+def record_last_run(
+    definition: JudgeDefinition, path: Path, input_columns: List[str]
+) -> None:
+    """Record that the CSV's answers now come from these questions."""
+    fingerprint = definition.fingerprint(input_columns)
+    definition.last_run_fingerprint = fingerprint
+    _set_top_level_key(path, "last_run", _toml_string(fingerprint))
+
+
+def record_written_columns(
+    definition: JudgeDefinition, path: Path, columns: Iterable[str]
+) -> None:
+    """Remember output columns written by pplyz judge (accumulates)."""
+    merged = list(definition.written_columns)
+    merged += [col for col in columns if col not in merged]
+    if merged == definition.written_columns and path.exists():
+        return
+    definition.written_columns = merged
+    _set_top_level_key(path, "written", _toml_array(merged))
 
 
 _ANSWER_MENU = (

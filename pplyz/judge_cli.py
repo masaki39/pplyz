@@ -31,7 +31,8 @@ from pplyz.judge import (
     find_definition,
     load_definition,
     output_fields,
-    record_completed_run,
+    record_last_run,
+    record_written_columns,
     run_wizard,
     save_definition,
     summarize,
@@ -249,11 +250,21 @@ def _resolve_definition(
     if not input_columns:
         input_columns = _ask_input_columns(csv_columns)
 
-    # Columns written by the questions being replaced may be reused.
-    replaced = set(output_fields(previous.questions, True)) if previous else set()
-    reserved = [col for col in csv_columns if col not in replaced]
+    # Columns written by the questions being replaced may be reused; the new
+    # definition inherits them so they still count as pplyz judge output.
+    owned: List[str] = []
+    if previous is not None:
+        owned = list(previous.written_columns)
+        owned += [
+            col
+            for col in output_fields(previous.questions, True)
+            if col in csv_columns and col not in owned
+        ]
+    reserved = [col for col in csv_columns if col not in owned]
     questions = run_wizard(reserved_columns=reserved, ask=_read_line)
-    definition = JudgeDefinition(questions=questions, input_columns=input_columns)
+    definition = JudgeDefinition(
+        questions=questions, input_columns=input_columns, written_columns=owned
+    )
 
     if exists:
         backup = path.with_name(path.name + ".bak")
@@ -279,13 +290,25 @@ def _check_columns_exist(columns: List[str], csv_columns: List[str]) -> None:
         )
 
 
-def _check_output_columns(output_columns: List[str], input_columns: List[str]) -> None:
-    """Refuse to overwrite the columns Jev reads (e.g. `column = "title"`)."""
+def _check_output_columns(
+    output_columns: List[str],
+    input_columns: List[str],
+    csv_columns: List[str],
+    owned: List[str],
+) -> None:
+    """Refuse to overwrite source data (e.g. `column = "title"` in the file)."""
     overlap = [col for col in output_columns if col in input_columns]
     if overlap:
         raise ValueError(
             f"Output column(s) {', '.join(overlap)} are also input columns. "
             "Rename the question's `column` in the questions file."
+        )
+    foreign = [col for col in output_columns if col in csv_columns and col not in owned]
+    if foreign:
+        raise ValueError(
+            f"Column(s) {', '.join(foreign)} already exist in the CSV and were not "
+            "written by pplyz judge. Rename the question's `column` in the questions "
+            "file so the original data is not overwritten."
         )
 
 
@@ -295,6 +318,14 @@ def _has_answers(csv_path: Path, output_columns: List[str]) -> bool:
     df = read_csv_preserving(csv_path)
     present = [col for col in output_columns if col in df.columns]
     return bool(present) and bool(df[present].notna().any().any())
+
+
+def _record(recorder, definition: JudgeDefinition, path: Path, value) -> None:
+    """Update the questions file; a read-only file only loses the bookkeeping."""
+    try:
+        recorder(definition, path, value)
+    except OSError as exc:
+        logger.warning("Could not update %s: %s", path, exc)
 
 
 def _resolve_output_path(raw: str | None, input_path: Path) -> Path:
@@ -329,24 +360,34 @@ def judge_main(argv: List[str]) -> None:
             )
         _check_columns_exist(columns, csv_columns)
         fields = output_fields(definition.questions, args.with_probability)
-        _check_output_columns(list(fields), columns)
+        target_path = (
+            output_path
+            if args.resume and output_path.exists() and output_path != input_path
+            else input_path
+        )
+        target_columns = list(pd.read_csv(target_path, nrows=0).columns)
+        _check_output_columns(
+            list(fields), columns, target_columns, definition.written_columns
+        )
 
+        # Answers already in the CSV may come from other questions: recreated
+        # questions reusing a column, edited questions, or an unknown history.
         resume = args.resume
-        if (
+        stale = (
             resume
-            and not created
-            and definition.changed_since_last_run()
             and _has_answers(output_path, list(fields))
-        ):
+            and (created or not definition.matches_last_run(columns))
+        )
+        if stale:
             if _is_interactive():
                 resume = not _confirm(
-                    "Questions changed since the last run. "
-                    "Recompute rows that already have answers?"
+                    "The CSV already has answers from different or edited questions. "
+                    "Recompute those rows?"
                 )
             else:
                 logger.warning(
-                    "Questions changed since the last run; rows with answers are "
-                    "kept. Rerun with -f to recompute them."
+                    "The CSV already has answers from different or edited questions; "
+                    "they are kept. Rerun with -f to recompute them."
                 )
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled.")
@@ -396,6 +437,10 @@ def judge_main(argv: List[str]) -> None:
                 print("Stopped. Rerun the same command to process all rows.")
                 return
 
+        _record(record_written_columns, definition, questions_path, list(fields))
+        if resume and not stale:
+            # Answers in the CSV (old and new) all match these questions.
+            _record(record_last_run, definition, questions_path, columns)
         processor.process_csv(
             input_path=input_path,
             output_path=output_path,
@@ -405,7 +450,9 @@ def judge_main(argv: List[str]) -> None:
             resume=resume,
             workers=args.workers,
         )
-        record_completed_run(definition, questions_path)
+        if not resume:
+            # Every row was recomputed with these questions.
+            _record(record_last_run, definition, questions_path, columns)
     except FatalAPIError as exc:
         print(f"Error: {exc}")
         sys.exit(1)
