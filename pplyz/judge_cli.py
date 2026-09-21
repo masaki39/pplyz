@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -308,7 +309,9 @@ def _check_output_columns(
         raise ValueError(
             f"Column(s) {', '.join(foreign)} already exist in the CSV and were not "
             "written by pplyz judge. Rename the question's `column` in the questions "
-            "file so the original data is not overwritten."
+            "file so the original data is not overwritten. If pplyz judge did create "
+            f"them, add `written = {json.dumps(foreign, ensure_ascii=False)}` to the "
+            "top of the questions file."
         )
 
 

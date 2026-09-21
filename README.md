@@ -112,6 +112,8 @@ Use these questions? (n = start over) [Y/n]:
 - Later runs reuse `papers.judge.toml` and skip rows that already have answers. If you
   edit the questions, pplyz asks whether to recompute those rows (or pass `-f`).
 - For a scale, list levels from lowest to highest (e.g. `low|medium|high`).
+- Use one questions file per CSV: it remembers which questions produced the answers
+  in that CSV.
 
 | Answer type | Column value |
 | --- | --- |
@@ -126,7 +128,7 @@ probability of the chosen option or level — for choice and scale questions.
 | Flag | Description |
 | --- | --- |
 | `-i, --input` | Columns shown to Jev (asked interactively if omitted). |
-| `-o, --output` | Write results to another CSV instead of updating the input in place. |
+| `-o, --output` | Write results to another CSV instead of updating the input in place (recomputing rebuilds it from the input). |
 | `-q, --questions` | Questions file (default: `<csv name>.judge.toml` next to the CSV). |
 | `-p, --preview` | Show results for a few rows without writing. |
 | `-f, --force` | Recompute every row (resume is default). |
