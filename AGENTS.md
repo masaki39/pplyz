@@ -4,7 +4,7 @@
 
 pplyz (short for "LLM Analyser") is a Python-based command-line tool designed to process CSV data using Large Language Models (LLMs). The tool enables users to augment their datasets with AI-generated structured outputs by processing each row sequentially through an LLM API.
 
-**Version 0.2.0** introduces LiteLLM integration for multi-provider support, enabling seamless switching between Gemini, OpenAI, Anthropic, and 100+ other LLM providers with enforced JSON structured output.
+pplyz uses LiteLLM integration for multi-provider support, enabling seamless switching between Gemini, OpenAI, Anthropic, and 100+ other LLM providers with enforced JSON structured output.
 
 ## Architecture
 
@@ -41,7 +41,15 @@ so `JevClient` calls it directly with `urllib` and implements the same
   contain spaces or non-ASCII.
 - `yes_no` → the raw probability of "yes" (float); thresholding is left to the user.
   `--with-probability` adds `<col>_p` (probability of the chosen label) for
-  choice/scale. `scale` score is a 0-based index into levels.
+  choice/scale. For `scale`, Jev's `score` is the probability-weighted mean of the
+  level indexes (e.g. 1.93), NOT an index: the level is the `probabilities` argmax.
+- 401/402/403 raise `JevFatalError` (a `FatalAPIError`): processing stops at once
+  instead of failing every row. Ctrl-C cancels retries (`JevClient.cancel`), saves
+  progress and exits with `os._exit(130)` so in-flight requests are not joined.
+- CSVs are read with `read_csv_preserving` (`dtype=str`) because results are written
+  back over the input; output columns are cast to `object` on resume.
+- The questions file stores `last_run` (fingerprint of the questions after a completed
+  run); if the questions change, `pplyz judge` offers to recompute answered rows.
 - `pplyz judge` runs rows in parallel (`--workers`, default 8) through
   `CSVProcessor._process_rows_parallel`; `JevClient` has no fixed request delay
   (429s are retried) and checkpoints are written every `CHECKPOINT_INTERVAL` seconds.
@@ -763,7 +771,7 @@ Based on lessons learned:
 
 ## Version History
 
-### Unreleased
+### v0.2.0 (Current)
 - **`pplyz judge`**: yes/no, choice and scale decisions with Jev via OpenRouter;
   interactive question wizard, questions saved to `<csv>.judge.toml`
 - **Keychain references**: `keychain:<name>` values in config/env, `pplyz auth set <name>`
@@ -780,7 +788,7 @@ Based on lessons learned:
   `ollama serve` / `ollama pull` / `--api-base`
 - No new dependencies (LiteLLM already ships Ollama support)
 
-### v0.2.0
+### LiteLLM migration (internal milestone, shipped in 0.1.x)
 - **LiteLLM Integration**: Replaced `google-generativeai` with LiteLLM
 - **Multi-Provider Support**: Supports Gemini, OpenAI, Anthropic, and 100+ providers
 - **Enforced JSON Mode**: Uses `response_format={"type": "json_object"}`

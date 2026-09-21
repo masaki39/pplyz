@@ -320,3 +320,32 @@ class TestResumeDetection:
         processor = CSVProcessor(TestParallelProcessing._FakeClient())
         row = pd.Series({"title": "x", "data": "{}"})
         assert processor._should_process_row(row, ["data"]) is True
+
+
+class TestFatalErrors:
+    def test_parallel_stops_on_fatal_error(self, sample_csv_file):
+        from pplyz.utils import FatalAPIError
+
+        class Client:
+            model_name = "fake"
+            cancelled = False
+
+            def generate_structured_output(self, prompt, input_data, response_model):
+                raise FatalAPIError("bad key")
+
+            def cancel(self):
+                self.cancelled = True
+
+        client = Client()
+        before = sample_csv_file.read_bytes()
+        with pytest.raises(FatalAPIError):
+            CSVProcessor(client).process_csv(
+                sample_csv_file,
+                sample_csv_file,
+                ["title"],
+                "p",
+                create_output_model_from_string("length:int"),
+                workers=2,
+            )
+        assert client.cancelled
+        assert sample_csv_file.read_bytes() == before

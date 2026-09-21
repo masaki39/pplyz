@@ -78,13 +78,20 @@ class TestOutputValues:
         with pytest.raises(ValueError, match="unexpected option"):
             judge.output_values(q, {"choice": "other"})
 
-    def test_scale_maps_index_to_label(self):
+    def test_scale_uses_most_likely_level_not_truncated_score(self):
+        """Regression: Jev's score is a weighted mean (1.93), not an index."""
         q = Question("s", "Score?", SCALE, ["low", "mid", "high"])
-        answer = {"score": 2, "probabilities": {"0": 0.1, "1": 0.2, "2": 0.7}}
+        answer = {"score": 1.93, "probabilities": {"0": 0, "1": 0.06, "2": 0.94}}
         assert judge.output_values(q, answer, with_probability=True) == {
             "s": "high",
-            "s_p": 0.7,
+            "s_p": 0.94,
         }
+        answer = {"score": 0.74, "probabilities": {"0": 0.33, "1": 0.6, "2": 0.07}}
+        assert judge.output_values(q, answer) == {"s": "mid"}
+
+    def test_scale_without_probabilities_rounds_score(self):
+        q = Question("s", "Score?", SCALE, ["low", "mid", "high"])
+        assert judge.output_values(q, {"score": 1.6}) == {"s": "high"}
 
     def test_scale_out_of_range(self):
         q = Question("s", "Score?", SCALE, ["low", "high"])
@@ -125,6 +132,42 @@ class TestDefinitionFile:
         with pytest.raises(ValueError):
             judge.load_definition(path)
 
+    def test_options_string_is_split(self, tmp_path):
+        path = tmp_path / "q.toml"
+        path.write_text(
+            '[[questions]]\ncolumn = "a"\nask = "x"\nanswer = "choice"\n'
+            'options = "yes|no|maybe"\n'
+        )
+        assert judge.load_definition(path).questions[0].options == [
+            "yes",
+            "no",
+            "maybe",
+        ]
+
+    def test_record_completed_run_keeps_user_edits(self, tmp_path):
+        path = tmp_path / "q.toml"
+        path.write_text(
+            '# my notes\ninput = ["title"]\n\n[[questions]]\n'
+            'column = "a"  # keep me\nask = "x"\n'
+        )
+        definition = judge.load_definition(path)
+        assert definition.last_run_fingerprint is None
+        assert not definition.changed_since_last_run()
+
+        judge.record_completed_run(definition, path)
+
+        text = path.read_text()
+        assert "# keep me" in text
+        reloaded = judge.load_definition(path)
+        assert reloaded.last_run_fingerprint == definition.fingerprint()
+        assert not reloaded.changed_since_last_run()
+
+        path.write_text(text.replace('ask = "x"', 'ask = "changed"'))
+        assert judge.load_definition(path).changed_since_last_run()
+
+        judge.record_completed_run(judge.load_definition(path), path)
+        assert path.read_text().count("last_run =") == 1
+
     def test_default_path_is_next_to_csv(self, tmp_path):
         csv_path = tmp_path / "papers.csv"
         assert judge.default_questions_path(csv_path) == tmp_path / "papers.judge.toml"
@@ -158,17 +201,18 @@ class TestWizard:
                 "low|high",
                 "strength",
                 "n",
+                "",  # confirm
             ]
         )
         assert questions == [
             Question("is_relevant", "Is it relevant?", YES_NO, []),
-            Question("q2", "Which topic?", CHOICE, ["a", "b", "c"]),
+            Question("which_topic", "Which topic?", CHOICE, ["a", "b", "c"]),
             Question("strength", "How strong?", SCALE, ["low", "high"]),
         ]
 
     def test_reprompts_on_invalid_input(self):
         questions, output = self._run(
-            ["", "Relevant?", "9", "2", "only", "x|x", "a|b", "title", "ok", ""],
+            ["", "Relevant?", "9", "2", "only", "x|x", "a|b", "title", "ok", "", ""],
             reserved=["title"],
         )
         assert questions == [Question("ok", "Relevant?", CHOICE, ["a", "b"])]

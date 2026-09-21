@@ -9,6 +9,7 @@ from pathlib import Path
 from pplyz.config import (
     API_KEY_ENV_VARS,
     DATA_DIR,
+    DEFAULT_MODEL_FALLBACK,
     DEFAULT_INPUT_COLUMNS_ENV_VAR,
     DEFAULT_OUTPUT_FIELDS_ENV_VAR,
     DEFAULT_PREVIEW_ROWS,
@@ -318,6 +319,16 @@ def _build_prompt_session():
     )
 
 
+def _other_provider_key_set() -> bool:
+    """True when an API key for a provider other than OpenRouter is configured."""
+    return any(
+        os.getenv(var)
+        for provider, env_vars in API_KEY_ENV_VARS.items()
+        if provider != "openrouter"
+        for var in env_vars
+    )
+
+
 def resolve_input_path(raw_path: str) -> Path:
     """Resolve and validate the input CSV path, exiting on error."""
     input_path = Path(raw_path)
@@ -359,6 +370,12 @@ def auth_main(argv: list[str]) -> None:
     args = parser.parse_args(argv)
 
     name = args.name.strip()
+    if not name or "/" in name:
+        print(
+            "Error: name must be non-empty and must not contain '/' "
+            "(e.g. pplyz auth set openrouter)."
+        )
+        sys.exit(1)
     print(f"Enter the API key for '{name}' (input is hidden).")
     try:
         store_keychain(name)
@@ -446,6 +463,14 @@ def main() -> None:
         sample_keys = [envs[0] for envs in API_KEY_ENV_VARS.values() if envs]
         sample_text = ", ".join(sample_keys[:5])
         logger.error("LLM client initialization failed: %s", e)
+        if args.model == DEFAULT_MODEL_FALLBACK and _other_provider_key_set():
+            logger.error(
+                "Note: since pplyz 0.2.0 the default model is %s (OpenRouter). "
+                "To keep using another provider, pass --model "
+                "(e.g. --model gemini/gemini-2.5-flash-lite) or set default_model "
+                "in config.toml.",
+                DEFAULT_MODEL_FALLBACK,
+            )
         logger.error(
             "Set the API key env var for your provider (e.g., %s) or add it to the TOML config.",
             sample_text,

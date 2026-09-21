@@ -7,7 +7,9 @@ repeated without re-entering them.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
@@ -141,9 +143,7 @@ def output_values(
                 raise ValueError(f"unexpected option '{value}'")
             key = value
         else:
-            index = int(answer["score"])
-            if not 0 <= index < len(question.options):
-                raise ValueError(f"score {index} out of range")
+            index = _scale_index(answer, len(question.options))
             value = question.options[index]
             key = str(index)
     except (KeyError, TypeError, ValueError) as exc:
@@ -162,6 +162,28 @@ def output_values(
     return values
 
 
+def _scale_index(answer: Dict[str, Any], levels: int) -> int:
+    """Pick the most likely level of a scale answer.
+
+    Jev's ``score`` is the probability-weighted mean of the level indexes (e.g.
+    1.93), not an index, so the level comes from the ``probabilities`` argmax.
+    ``round(score)`` is only a fallback when probabilities are missing.
+    """
+    probabilities = answer.get("probabilities") or {}
+    ranked = [
+        (float(probability), int(index))
+        for index, probability in probabilities.items()
+        if probability is not None and 0 <= int(index) < levels
+    ]
+    if ranked:
+        # Highest probability; ties go to the lower level.
+        return max(ranked, key=lambda item: (item[0], -item[1]))[1]
+    index = round(float(answer["score"]))
+    if not 0 <= index < levels:
+        raise ValueError(f"score {answer['score']} out of range")
+    return index
+
+
 def default_questions_path(csv_path: Path) -> Path:
     """Return the questions file stored next to a CSV (``data.judge.toml``)."""
     return csv_path.with_name(csv_path.stem + QUESTIONS_FILE_SUFFIX)
@@ -173,6 +195,32 @@ class JudgeDefinition:
 
     questions: List[Question]
     input_columns: List[str] = field(default_factory=list)
+    # Fingerprint of the questions the CSV was last fully processed with.
+    last_run_fingerprint: Optional[str] = None
+
+    def fingerprint(self) -> str:
+        """Hash of everything that changes Jev's answers."""
+        payload = [[q.column, q.ask, q.answer, q.options] for q in self.questions] + [
+            self.input_columns
+        ]
+        digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        return digest.hexdigest()[:16]
+
+    def changed_since_last_run(self) -> bool:
+        """True when questions were edited after the last completed run."""
+        return (
+            self.last_run_fingerprint is not None
+            and self.last_run_fingerprint != self.fingerprint()
+        )
+
+
+def _parse_options(raw: Any) -> List[str]:
+    """Accept options as a list or as a "a|b|c" string."""
+    if isinstance(raw, str):
+        raw = raw.split("|")
+    if not isinstance(raw, list):
+        raise ValueError(f'options must be a list like ["a", "b"] (got {raw!r})')
+    return [str(option).strip() for option in raw]
 
 
 def load_definition(path: Path) -> JudgeDefinition:
@@ -200,7 +248,7 @@ def load_definition(path: Path) -> JudgeDefinition:
                 column=str(entry.get("column", "")).strip(),
                 ask=str(entry.get("ask", "")).strip(),
                 answer=str(entry.get("answer", YES_NO)).strip(),
-                options=[str(option).strip() for option in entry.get("options", [])],
+                options=_parse_options(entry.get("options", [])),
             )
         )
     validate_questions(questions)
@@ -208,9 +256,11 @@ def load_definition(path: Path) -> JudgeDefinition:
     input_columns = data.get("input", [])
     if isinstance(input_columns, str):
         input_columns = [col.strip() for col in input_columns.split(",")]
+    fingerprint = data.get("last_run")
     return JudgeDefinition(
         questions=questions,
         input_columns=[str(col) for col in input_columns if str(col).strip()],
+        last_run_fingerprint=str(fingerprint) if fingerprint else None,
     )
 
 
@@ -227,8 +277,11 @@ def dump_definition(definition: JudgeDefinition) -> str:
     """Serialize a definition to TOML."""
     lines = [
         "# Questions for `pplyz judge`. Edit freely, then rerun: pplyz judge <csv>",
+        "# (pplyz asks whether to recompute existing rows when questions changed)",
         "# answer: yes_no | choice (options) | scale (options, lowest -> highest)",
     ]
+    if definition.last_run_fingerprint:
+        lines.append(f"last_run = {_toml_string(definition.last_run_fingerprint)}")
     if definition.input_columns:
         lines.append(f"input = {_toml_array(definition.input_columns)}")
     for question in definition.questions:
@@ -247,6 +300,29 @@ def dump_definition(definition: JudgeDefinition) -> str:
 def save_definition(definition: JudgeDefinition, path: Path) -> None:
     """Write a definition to ``path``."""
     path.write_text(dump_definition(definition), encoding="utf-8")
+
+
+_LAST_RUN_LINE = re.compile(r"^last_run\s*=.*$", re.MULTILINE)
+
+
+def record_completed_run(definition: JudgeDefinition, path: Path) -> None:
+    """Store the fingerprint of a fully processed run, keeping the user's edits."""
+    fingerprint = definition.fingerprint()
+    definition.last_run_fingerprint = fingerprint
+    line = f"last_run = {_toml_string(fingerprint)}"
+    text = path.read_text(encoding="utf-8")
+    if _LAST_RUN_LINE.search(text):
+        text = _LAST_RUN_LINE.sub(lambda _m: line, text, count=1)
+    else:
+        # Top-level keys must come before the first [[questions]] table.
+        lines = text.splitlines()
+        insert_at = next(
+            (i for i, current in enumerate(lines) if not current.startswith("#")),
+            len(lines),
+        )
+        lines.insert(insert_at, line)
+        text = "\n".join(lines) + "\n"
+    path.write_text(text, encoding="utf-8")
 
 
 _ANSWER_MENU = (
@@ -282,6 +358,7 @@ def run_wizard(
         say("")
         say(f"Question {number}: What should be judged for each row?")
         if number == 1:
+            say("  Jev reads the selected columns of each row and answers this.")
             say('  e.g. "Is this paper about cancer research?"')
         text = _ask_nonempty(ask, "> ")
 
@@ -310,7 +387,7 @@ def run_wizard(
             )
 
         used = reserved | {q.column for q in questions}
-        column = _ask_column(ask, say, _default_column(number, used), used)
+        column = _ask_column(ask, say, _suggest_column(text, number, used), used)
         question = Question(
             column=column, ask=text, answer=answer_type, options=options
         )
@@ -318,8 +395,17 @@ def run_wizard(
         questions.append(question)
 
         more = ask("Add another question? [y/N]: ").strip().lower()
-        if more not in ("y", "yes"):
+        if more in ("y", "yes"):
+            continue
+
+        say("")
+        say("Questions:")
+        for i, q in enumerate(questions, start=1):
+            say(f"  {i}. {q.describe()}: {q.ask}")
+        done = ask("Use these questions? (n = start over) [Y/n]: ").strip().lower()
+        if done in ("", "y", "yes"):
             return questions
+        questions = []
 
 
 def _ask_nonempty(ask: Callable[[str], str], prompt: str) -> str:
@@ -354,12 +440,20 @@ def _ask_options(
             return options
 
 
-def _default_column(number: int, used: set[str]) -> str:
-    candidate = f"q{number}"
-    suffix = number
+_STOP_WORDS = {"a", "an", "the", "is", "are", "this", "it", "does", "do", "of"}
+MAX_SUGGESTED_COLUMN = 30
+
+
+def _suggest_column(text: str, number: int, used: set[str]) -> str:
+    """Suggest a column name from the question text (fallback ``q<number>``)."""
+    words = [w.lower() for w in re.findall(r"\w+", text)]
+    meaningful = [w for w in words if w not in _STOP_WORDS] or words
+    base = "_".join(meaningful[:4])[:MAX_SUGGESTED_COLUMN].strip("_") or f"q{number}"
+    candidate = base
+    suffix = 2
     while candidate in used:
+        candidate = f"{base}_{suffix}"
         suffix += 1
-        candidate = f"q{suffix}"
     return candidate
 
 

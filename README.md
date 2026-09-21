@@ -6,6 +6,11 @@
 
 Add LLM-generated columns to a CSV with one command.
 
+> [!important]
+> **0.2.0:** the default model is now `openrouter/google/gemini-2.5-flash-lite`, which needs
+> `OPENROUTER_API_KEY`. To keep using another provider, pass `--model`
+> (e.g. `gemini/gemini-2.5-flash-lite`) or set `default_model` in `config.toml`.
+
 ## Requirements
 
 - [uv](https://github.com/astral-sh/uv) (Recommended)
@@ -62,8 +67,12 @@ pplyz -h
 
 `pplyz judge` asks [Jev](https://openrouter.ai/typesafe) — TypeSafe's decision-only model —
 the same questions about every row. Jev never writes text, so answers are always one of
-the allowed values, and it is much faster and cheaper than a chat LLM. It uses your
-`OPENROUTER_API_KEY`.
+the allowed values, and it is much faster and cheaper than a chat LLM (rows run 8 at a
+time by default).
+
+It uses your `OPENROUTER_API_KEY` (create one at <https://openrouter.ai/keys>; see
+[Keeping API keys out of config files](#keeping-api-keys-out-of-config-files-macos-keychain)).
+Jev is served from OpenRouter's *alpha* decisions endpoint, so details may still change.
 
 ```bash
 pplyz judge papers.csv
@@ -72,44 +81,58 @@ pplyz judge papers.csv
 The first run walks you through the questions — no special syntax needed:
 
 ```
-Columns in the CSV:
+Columns in the CSV (3):
   title, abstract, year
-Which columns should Jev read? (comma-separated): title,abstract
+Which columns should Jev read? (comma-separated, Tab to complete): title,abstract
 
 Question 1: What should be judged for each row?
+  Jev reads the selected columns of each row and answers this.
+  e.g. "Is this paper about cancer research?"
 > Is this paper about cancer research?
 How should it be answered?
-  1) Yes / No
+  1) Yes / No (saved as the probability of yes, 0-1)
   2) Pick one of several options
   3) Rate on a scale (lowest -> highest)
 Choose [1]: 1
-Output column name [q1]: is_cancer
+Output column name [paper_about_cancer_research]: is_cancer
 Add another question? [y/N]: n
+
+Questions:
+  1. is_cancer (yes/no probability): Is this paper about cancer research?
+Use these questions? (n = start over) [Y/n]:
 
 → Saved questions to papers.judge.toml (edit it or rerun to reuse)
 ```
 
-When picking columns, press Tab to complete names — typing any part of a name finds it,
-which helps with wide CSVs.
-
-pplyz then previews a few rows and asks before processing the whole file. Later runs
-reuse `papers.judge.toml` automatically (or pass `--questions FILE`).
+- When picking columns, press Tab to complete names — typing any part of a name finds it,
+  which helps with wide CSVs.
+- pplyz then previews a few rows and asks before processing the whole file.
+- **Results are added as new columns to the input CSV (in place).** Pass `-o out.csv` to
+  keep the input unchanged. Existing cells are kept as text (e.g. `001` stays `001`).
+- Later runs reuse `papers.judge.toml` and skip rows that already have answers. If you
+  edit the questions, pplyz asks whether to recompute those rows (or pass `-f`).
+- For a scale, list levels from lowest to highest (e.g. `low|medium|high`).
 
 | Answer type | Column value |
 | --- | --- |
-| Yes / No | probability of "yes" (0–1), e.g. `0.93` — filter with any threshold later |
+| Yes / No | probability of "yes" (0–1), e.g. `0.93` |
 | Pick one of several options | the chosen option |
-| Rate on a scale | the chosen level |
+| Rate on a scale | the most likely level |
+
+Yes/no columns hold the probability itself so you can pick any threshold later
+(e.g. `df[df.is_cancer >= 0.8]`). `--with-probability` adds `<column>_p` — the
+probability of the chosen option or level — for choice and scale questions.
 
 | Flag | Description |
 | --- | --- |
 | `-i, --input` | Columns shown to Jev (asked interactively if omitted). |
+| `-o, --output` | Write results to another CSV instead of updating the input in place. |
 | `-q, --questions` | Questions file (default: `<csv name>.judge.toml` next to the CSV). |
 | `-p, --preview` | Show results for a few rows without writing. |
-| `-f, --force` | Reprocess all rows (resume is default). |
-| `-m, --model` | Jev model on OpenRouter (default: `typesafe/jev-1.13`, or `jev_model` in config). |
+| `-f, --force` | Recompute every row (resume is default). |
 | `-w, --workers` | Rows processed in parallel (default: `8`). |
-| `--with-probability` | Also write `<column>_p` (probability of the chosen label) for choice/scale questions. |
+| `-m, --model` | Jev model on OpenRouter (default: `typesafe/jev-1.13`, or `jev_model` in config). |
+| `--with-probability` | Also write `<column>_p` for choice/scale questions. |
 | `--endpoint` | Decisions endpoint URL (default: OpenRouter's alpha endpoint). |
 
 ## Configuration

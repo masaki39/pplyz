@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
+import random
+import threading
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -27,20 +28,39 @@ from .config import (
 )
 from .judge import Question, output_values
 from .keychain import resolve_env_secrets
-from .utils import format_error_message
+from .utils import FatalAPIError, format_error_message
 
 logger = logging.getLogger(__name__)
 
 # HTTP statuses worth retrying: rate limit, transient server errors, overload.
 RETRYABLE_STATUSES = {429, 500, 502, 503, 504, 529}
+# Statuses that would fail every row: stop instead of trying the whole CSV.
+FATAL_STATUS_HINTS = {
+    401: "OpenRouter rejected the API key. Check OPENROUTER_API_KEY "
+    "(if it uses keychain:, store the key again with 'pplyz auth set openrouter').",
+    402: "OpenRouter reports insufficient credits. Add credits at "
+    "https://openrouter.ai/settings/credits.",
+    403: "OpenRouter denied access to Jev with this API key.",
+}
 
 
 class JevRequestError(RuntimeError):
     """Raised when the decisions endpoint returns an error."""
 
-    def __init__(self, status: int | None, message: str):
+    def __init__(
+        self, status: int | None, message: str, retry_after: float | None = None
+    ):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
+
+
+class JevFatalError(FatalAPIError):
+    """Raised for errors that would fail every row (bad key, no credits)."""
+
+
+class JevCancelled(RuntimeError):
+    """Raised when a request is abandoned because processing was interrupted."""
 
 
 class JevClient:
@@ -78,6 +98,7 @@ class JevClient:
         self.endpoint = endpoint or DEFAULT_JEV_ENDPOINT
         self.with_probability = with_probability
         self.provider = "openrouter"
+        self._cancelled = threading.Event()
         self.api_key = api_key or self._load_api_key()
 
     def _load_api_key(self) -> str:
@@ -120,24 +141,38 @@ class JevClient:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            hint = FATAL_STATUS_HINTS.get(exc.code)
+            if hint:
+                raise JevFatalError(f"{hint} (HTTP {exc.code}: {detail})") from exc
             raise JevRequestError(
-                exc.code, f"HTTP {exc.code} from {self.endpoint}: {detail}"
+                exc.code,
+                f"HTTP {exc.code} from {self.endpoint}: {detail}",
+                retry_after=_parse_retry_after(exc.headers.get("Retry-After")),
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise JevRequestError(
                 None, f"Could not reach {self.endpoint}: {exc}"
             ) from exc
 
+    def cancel(self) -> None:
+        """Stop retrying and refuse new requests (called on Ctrl-C)."""
+        self._cancelled.set()
+
     def _post_with_retry(self, body: Dict[str, Any]) -> Dict[str, Any]:
         attempt = 0
         while True:
+            if self._cancelled.is_set():
+                raise JevCancelled("Cancelled")
             try:
                 return self._post(body)
             except JevRequestError as exc:
                 retryable = exc.status is None or exc.status in RETRYABLE_STATUSES
                 if not retryable or attempt >= len(RETRY_BACKOFF_SCHEDULE):
                     raise
-                delay = RETRY_BACKOFF_SCHEDULE[attempt]
+                # Jitter keeps parallel workers from retrying in lockstep.
+                delay = RETRY_BACKOFF_SCHEDULE[attempt] * random.uniform(0.5, 1.5)
+                if exc.retry_after is not None:
+                    delay = max(delay, exc.retry_after)
                 logger.warning(
                     "Jev request failed (attempt %d/%d): %s. Retrying in %.1fs...",
                     attempt + 1,
@@ -145,7 +180,8 @@ class JevClient:
                     format_error_message(exc, limit=300),
                     delay,
                 )
-                time.sleep(delay)
+                if self._cancelled.wait(delay):
+                    raise JevCancelled("Cancelled") from exc
                 attempt += 1
 
     def generate_structured_output(
@@ -171,6 +207,14 @@ class JevClient:
                 raise ValueError(f"Jev returned no answer for '{question.column}'")
             output.update(output_values(question, answer, self.with_probability))
         return output
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header given in seconds (HTTP-date is ignored)."""
+    try:
+        return max(0.0, float(value)) if value else None
+    except ValueError:
+        return None
 
 
 def _question_id(index: int) -> str:

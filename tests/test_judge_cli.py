@@ -111,6 +111,7 @@ def test_judge_wizard_saves_previews_then_processes(
             "high|low",
             "level",
             "n",
+            "",  # confirm the questions
             "y",  # process all rows after preview
         ]
     )
@@ -162,3 +163,87 @@ def test_column_completer_completes_after_comma_and_skips_chosen():
     columns = ["title", "abstract", "author"]
     assert _complete(columns, "title, a") == ["abstract", "author"]
     assert _complete(columns, "abstract,") == ["title", "author"]
+
+
+def test_judge_auth_error_stops_without_touching_csv(
+    sample_csv_file, monkeypatch, capsys
+):
+    from pplyz.jev_client import JevFatalError
+
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    _save_questions(sample_csv_file)
+    before = sample_csv_file.read_bytes()
+    calls = []
+
+    def fake_post(self, body):
+        calls.append(body)
+        raise JevFatalError("OpenRouter rejected the API key.")
+
+    monkeypatch.setattr(JevClient, "_post", fake_post)
+
+    with pytest.raises(SystemExit):
+        _run(["judge", str(sample_csv_file), "-w", "1"])
+
+    assert "rejected the API key" in capsys.readouterr().out
+    assert len(calls) == 1
+    assert sample_csv_file.read_bytes() == before
+
+
+def test_judge_output_option_keeps_input(sample_csv_file, fake_jev, monkeypatch):
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    _save_questions(sample_csv_file)
+    before = sample_csv_file.read_bytes()
+    out = sample_csv_file.with_name("judged.csv")
+
+    _run(["judge", str(sample_csv_file), "-o", str(out)])
+
+    assert sample_csv_file.read_bytes() == before
+    assert pd.read_csv(out)["level"].tolist() == ["low", "low", "low"]
+
+
+def test_judge_rejects_output_column_equal_to_input(
+    sample_csv_file, monkeypatch, capsys
+):
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    path = sample_csv_file.with_name(sample_csv_file.stem + ".judge.toml")
+    save_definition(JudgeDefinition([Question("title", "Relevant?")], ["title"]), path)
+    with pytest.raises(SystemExit):
+        _run(["judge", str(sample_csv_file)])
+    assert "also input columns" in capsys.readouterr().out
+
+
+def test_judge_asks_to_recompute_after_questions_change(
+    sample_csv_file, fake_jev, monkeypatch
+):
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    path = _save_questions(sample_csv_file)
+    _run(["judge", str(sample_csv_file)])
+    assert "last_run =" in path.read_text()
+
+    path.write_text(path.read_text().replace("Relevant?", "Really relevant?"))
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "y")
+
+    _run(["judge", str(sample_csv_file)])
+
+    assert len(fake_jev) == 6  # all rows recomputed
+
+
+def test_judge_preserves_original_values(tmp_path, fake_jev, monkeypatch):
+    monkeypatch.setattr(judge_cli, "_is_interactive", lambda: False)
+    csv_path = tmp_path / "ids.csv"
+    csv_path.write_text("id,title,note\n001,A,NA\n010,B,1.10\n")
+    _save_questions(csv_path)
+
+    _run(["judge", str(csv_path)])
+
+    lines = csv_path.read_text().splitlines()
+    assert lines[1].startswith("001,A,NA,")
+    assert lines[2].startswith("010,B,1.10,")
+
+
+def test_auth_set_rejects_slash(monkeypatch, capsys):
+    monkeypatch.setattr("pplyz.cli.store_keychain", lambda name: None)
+    with pytest.raises(SystemExit):
+        _run(["auth", "set", "a/b"])
+    assert "must not contain '/'" in capsys.readouterr().out

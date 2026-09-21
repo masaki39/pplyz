@@ -1,10 +1,18 @@
 """Tests for pplyz.jev_client."""
 
+import io
+import urllib.error
+
 import numpy as np
 import pytest
 
 from pplyz import jev_client
-from pplyz.jev_client import JevClient, JevRequestError
+from pplyz.jev_client import (
+    JevCancelled,
+    JevClient,
+    JevFatalError,
+    JevRequestError,
+)
 from pplyz.judge import CHOICE, Question
 
 QUESTIONS = [
@@ -14,8 +22,8 @@ QUESTIONS = [
 
 
 @pytest.fixture(autouse=True)
-def no_sleep(monkeypatch):
-    monkeypatch.setattr(jev_client.time, "sleep", lambda _s: None)
+def no_backoff(monkeypatch):
+    monkeypatch.setattr(jev_client, "RETRY_BACKOFF_SCHEDULE", [0] * 9)
 
 
 @pytest.fixture
@@ -98,5 +106,43 @@ class TestRetry:
 
         monkeypatch.setattr(client, "_post", fake_post)
         with pytest.raises(JevRequestError):
+            client._post_with_retry({})
+        assert len(calls) == 1
+
+
+def _http_error(code, body=b"{}", headers=None):
+    return urllib.error.HTTPError(
+        "https://example", code, "err", headers or {}, io.BytesIO(body)
+    )
+
+
+class TestErrors:
+    def test_auth_error_is_fatal_with_hint(self, client, monkeypatch):
+        def fake_urlopen(*args, **kwargs):
+            raise _http_error(401, b'{"error":"Missing Authentication header"}')
+
+        monkeypatch.setattr(jev_client.urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(JevFatalError, match="pplyz auth set openrouter"):
+            client._post({})
+
+    def test_retry_after_header_is_parsed(self, client, monkeypatch):
+        def fake_urlopen(*args, **kwargs):
+            raise _http_error(429, headers={"Retry-After": "7"})
+
+        monkeypatch.setattr(jev_client.urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(JevRequestError) as info:
+            client._post({})
+        assert info.value.retry_after == 7.0
+
+    def test_cancel_stops_retries(self, client, monkeypatch):
+        calls = []
+
+        def fake_post(body):
+            calls.append(body)
+            client.cancel()
+            raise JevRequestError(503, "busy")
+
+        monkeypatch.setattr(client, "_post", fake_post)
+        with pytest.raises(JevCancelled):
             client._post_with_retry({})
         assert len(calls) == 1

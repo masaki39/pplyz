@@ -13,9 +13,19 @@ from pydantic import BaseModel
 from .config import CHECKPOINT_INTERVAL, DEFAULT_PREVIEW_ROWS
 from .llm_client import LLMClient
 from .schemas import get_field_names
-from .utils import color_text, format_error_message
+from .utils import FatalAPIError, color_text, format_error_message
 
 logger = logging.getLogger(__name__)
+
+
+def read_csv_preserving(path: Path) -> pd.DataFrame:
+    """Read a CSV without reinterpreting values.
+
+    The output is written back over the input, so cells are kept as text: IDs such
+    as ``001`` or ``1.10`` and strings like ``NA`` survive a round trip. Only
+    empty cells become missing values.
+    """
+    return pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
 
 
 class CSVProcessor:
@@ -118,11 +128,11 @@ class CSVProcessor:
         # Load CSV - use output if it exists and resume is True
         if output_path.exists() and resume:
             logger.info("Loading existing output (resume): %s", output_path)
-            df = pd.read_csv(output_path)
+            df = read_csv_preserving(output_path)
             logger.info("Loaded %d rows (resume mode)", len(df))
         else:
             logger.info("Loading CSV from %s", input_path)
-            df = pd.read_csv(input_path)
+            df = read_csv_preserving(input_path)
             logger.info("Loaded %d rows", len(df))
 
         # Validate columns
@@ -138,6 +148,10 @@ class CSVProcessor:
         for col in new_column_names:
             if col not in df.columns:
                 df[col] = pd.NA
+            else:
+                # Columns come back as text (or all-NaN floats) on resume; object
+                # dtype accepts any value the client returns.
+                df[col] = df[col].astype(object)
 
         # Process each row
         schema_info = ",".join(new_column_names)
@@ -181,7 +195,10 @@ class CSVProcessor:
                     and not self._should_process_row(row, new_column_names)
                 ):
                     logger.info(
-                        color_text(f"{prefix} → skip (already processed)", "cyan")
+                        color_text(
+                            f"{prefix} → skip (already processed; -f to recompute)",
+                            "cyan",
+                        )
                     )
                     # Keep existing data
                     existing_data = {
@@ -206,6 +223,8 @@ class CSVProcessor:
                     processed += 1
                     logger.info(color_text(f"{prefix} ✓ success", "green"))
 
+                except FatalAPIError:
+                    raise
                 except Exception as e:
                     logger.error(
                         color_text(f"{prefix} ✗ {format_error_message(e)}", "red")
@@ -297,12 +316,16 @@ class CSVProcessor:
 
         if skipped:
             logger.info(
-                color_text(f"→ skip {skipped} already processed row(s)", "cyan")
+                color_text(
+                    f"→ skip {skipped} already processed row(s) (-f to recompute)",
+                    "cyan",
+                )
             )
         logger.info("Running %d row(s) with %d workers", len(pending), workers)
 
         failed_rows = []
         processed = 0
+        succeeded = 0
         last_checkpoint = time()
         executor = ThreadPoolExecutor(max_workers=workers)
         try:
@@ -323,7 +346,10 @@ class CSVProcessor:
                 try:
                     output = future.result()
                     self._apply_output_to_df(df, idx, output)
+                    succeeded += 1
                     logger.info(color_text(f"{prefix} ✓ success", "green"))
+                except FatalAPIError:
+                    raise
                 except Exception as e:
                     formatted = format_error_message(e)
                     logger.error(color_text(f"{prefix} ✗ {formatted}", "red"))
@@ -339,10 +365,16 @@ class CSVProcessor:
                     self._write_checkpoint(df, output_path)
                     last_checkpoint = time()
         except BaseException:
+            # Stop retries in flight and drop queued rows, then keep what finished.
+            cancel = getattr(self.llm_client, "cancel", None)
+            if cancel is not None:
+                cancel()
             executor.shutdown(wait=False, cancel_futures=True)
-            self._write_checkpoint(df, output_path)
+            if succeeded:
+                self._write_checkpoint(df, output_path)
             raise
         executor.shutdown()
+        self._write_checkpoint(df, output_path)
 
         failed_rows.sort(key=lambda info: info["position"])
         return processed, skipped, failed_rows
@@ -390,7 +422,11 @@ class CSVProcessor:
                 results[position] = output
                 if df is not None:
                     self._apply_output_to_df(df, row.name, output)
+                    if output_path is not None:
+                        self._write_checkpoint(df, output_path)
                 logger.info(color_text(f"Row {row_num} ✓ recovered on retry", "green"))
+            except FatalAPIError:
+                raise
             except Exception as retry_error:
                 formatted = format_error_message(retry_error)
                 failure["error"] = formatted
@@ -439,7 +475,7 @@ class CSVProcessor:
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
         # Load CSV
-        df = pd.read_csv(input_path)
+        df = read_csv_preserving(input_path)
 
         # Validate columns
         missing_cols = set(columns) - set(df.columns)

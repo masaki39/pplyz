@@ -31,12 +31,14 @@ from pplyz.judge import (
     find_definition,
     load_definition,
     output_fields,
+    record_completed_run,
     run_wizard,
     save_definition,
     summarize,
 )
-from pplyz.processor import CSVProcessor
+from pplyz.processor import CSVProcessor, read_csv_preserving
 from pplyz.schemas import create_output_model
+from pplyz.utils import FatalAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,15 @@ def parse_judge_arguments(argv: List[str]) -> argparse.Namespace:
         description=(
             "Answer yes/no, choice or scale questions for every row with Jev "
             "(via OpenRouter).\nRun without --questions to define questions "
-            "interactively; they are saved next to the CSV for reuse."
+            "interactively; they are saved next to the CSV for reuse.\n"
+            "Results are added as new columns to INPUT (in place) unless -o is given."
+        ),
+        epilog=(
+            "examples:\n"
+            "  pplyz judge papers.csv              first run asks the questions\n"
+            "  pplyz judge papers.csv -p           preview a few rows only\n"
+            "  pplyz judge papers.csv -o out.csv   keep papers.csv unchanged\n"
+            "  pplyz judge papers.csv -f           recompute every row"
         ),
     )
     parser.add_argument("input_path", metavar="INPUT", help="Input CSV path")
@@ -64,6 +74,12 @@ def parse_judge_arguments(argv: List[str]) -> argparse.Namespace:
         dest="input_columns",
         type=str,
         help="Comma-separated columns shown to Jev (asked interactively if omitted)",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        help="Write results to this CSV instead of updating INPUT in place",
     )
     parser.add_argument(
         "--questions",
@@ -204,16 +220,21 @@ def _resolve_definition(
         questions were just entered interactively.
     """
     path, exists = find_definition(input_path, args.questions)
+    previous: JudgeDefinition | None = None
     if exists:
         use_saved = (
             args.questions is not None
             or not _is_interactive()
-            or _confirm(f"Use saved questions from {path.name}?")
+            or _confirm(f"Use saved questions from {path.name}? (n = create new ones)")
         )
         if use_saved:
             definition = load_definition(path)
             logger.info("Loaded questions from %s", path)
             return definition, path, False
+        try:
+            previous = load_definition(path)
+        except ValueError:
+            previous = None
     elif args.questions is not None:
         raise ValueError(f"Questions file not found: {path}")
 
@@ -223,11 +244,21 @@ def _resolve_definition(
             f"them, or pass --questions (expected at {path})."
         )
 
-    input_columns = _split_columns(args.input_columns) or _ask_input_columns(
-        csv_columns
-    )
-    questions = run_wizard(reserved_columns=csv_columns, ask=_read_line)
+    input_columns = _split_columns(args.input_columns)
+    _check_columns_exist(input_columns, csv_columns)
+    if not input_columns:
+        input_columns = _ask_input_columns(csv_columns)
+
+    # Columns written by the questions being replaced may be reused.
+    replaced = set(output_fields(previous.questions, True)) if previous else set()
+    reserved = [col for col in csv_columns if col not in replaced]
+    questions = run_wizard(reserved_columns=reserved, ask=_read_line)
     definition = JudgeDefinition(questions=questions, input_columns=input_columns)
+
+    if exists:
+        backup = path.with_name(path.name + ".bak")
+        path.replace(backup)
+        print(f"\n→ Previous questions moved to {backup.name}")
     save_definition(definition, path)
     print(f"\n→ Saved questions to {path} (edit it or rerun to reuse)")
     return definition, path, True
@@ -239,14 +270,84 @@ def _split_columns(raw: str | None) -> List[str]:
     return [col.strip() for col in raw.split(",") if col.strip()]
 
 
+def _check_columns_exist(columns: List[str], csv_columns: List[str]) -> None:
+    missing = [col for col in columns if col not in csv_columns]
+    if missing:
+        raise ValueError(
+            f"Columns not found in the CSV: {', '.join(missing)}\n"
+            f"Available columns: {', '.join(csv_columns)}"
+        )
+
+
+def _check_output_columns(output_columns: List[str], input_columns: List[str]) -> None:
+    """Refuse to overwrite the columns Jev reads (e.g. `column = "title"`)."""
+    overlap = [col for col in output_columns if col in input_columns]
+    if overlap:
+        raise ValueError(
+            f"Output column(s) {', '.join(overlap)} are also input columns. "
+            "Rename the question's `column` in the questions file."
+        )
+
+
+def _has_answers(csv_path: Path, output_columns: List[str]) -> bool:
+    if not csv_path.exists():
+        return False
+    df = read_csv_preserving(csv_path)
+    present = [col for col in output_columns if col in df.columns]
+    return bool(present) and bool(df[present].notna().any().any())
+
+
+def _resolve_output_path(raw: str | None, input_path: Path) -> Path:
+    if not raw:
+        return input_path
+    path = Path(raw).expanduser().resolve()
+    if path.suffix.lower() != ".csv":
+        raise ValueError(f"Output file must have a .csv extension: {path}")
+    return path
+
+
 def judge_main(argv: List[str]) -> None:
     """Entry point for `pplyz judge`."""
     args = parse_judge_arguments(argv)
     input_path = resolve_input_path(args.input_path)
 
     try:
+        output_path = _resolve_output_path(args.output, input_path)
         csv_columns = list(pd.read_csv(input_path, nrows=0).columns)
-        definition, _, created = _resolve_definition(args, input_path, csv_columns)
+        definition, questions_path, created = _resolve_definition(
+            args, input_path, csv_columns
+        )
+        columns = (
+            _split_columns(args.input_columns)
+            or definition.input_columns
+            or _split_columns(os.environ.get(DEFAULT_INPUT_COLUMNS_ENV_VAR))
+        )
+        if not columns:
+            raise ValueError(
+                "no input columns. Pass --input/-i or add `input = [...]` "
+                "to the questions file."
+            )
+        _check_columns_exist(columns, csv_columns)
+        fields = output_fields(definition.questions, args.with_probability)
+        _check_output_columns(list(fields), columns)
+
+        resume = args.resume
+        if (
+            resume
+            and not created
+            and definition.changed_since_last_run()
+            and _has_answers(output_path, list(fields))
+        ):
+            if _is_interactive():
+                resume = not _confirm(
+                    "Questions changed since the last run. "
+                    "Recompute rows that already have answers?"
+                )
+            else:
+                logger.warning(
+                    "Questions changed since the last run; rows with answers are "
+                    "kept. Rerun with -f to recompute them."
+                )
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled.")
         sys.exit(1)
@@ -254,22 +355,8 @@ def judge_main(argv: List[str]) -> None:
         print(f"Error: {exc}")
         sys.exit(1)
 
-    columns = (
-        _split_columns(args.input_columns)
-        or definition.input_columns
-        or _split_columns(os.environ.get(DEFAULT_INPUT_COLUMNS_ENV_VAR))
-    )
-    if not columns:
-        print(
-            "Error: no input columns. Pass --input/-i or add `input = [...]` "
-            "to the questions file."
-        )
-        sys.exit(1)
-
     questions = definition.questions
-    response_model = create_output_model(
-        output_fields(questions, args.with_probability), "JudgeOutput"
-    )
+    response_model = create_output_model(fields, "JudgeOutput")
     summary = "Jev questions: " + summarize(questions)
 
     try:
@@ -297,22 +384,36 @@ def judge_main(argv: List[str]) -> None:
             )
             if args.preview:
                 return
-            if not _confirm("\nProcess all rows and write results to the CSV?"):
+            total = len(read_csv_preserving(input_path))
+            target = (
+                f"{output_path.name} (in place)"
+                if output_path == input_path
+                else output_path.name
+            )
+            if not _confirm(
+                f"\nProcess all {total:,} rows and write results into {target}?"
+            ):
                 print("Stopped. Rerun the same command to process all rows.")
                 return
 
         processor.process_csv(
             input_path=input_path,
-            output_path=input_path,
+            output_path=output_path,
             columns=columns,
             prompt=summary,
             response_model=response_model,
-            resume=args.resume,
+            resume=resume,
             workers=args.workers,
         )
+        record_completed_run(definition, questions_path)
+    except FatalAPIError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         sys.exit(1)
     except (KeyboardInterrupt, EOFError):
-        print("\n\nProcessing interrupted by user")
-        sys.exit(1)
+        print("\n\nProcessing interrupted by user (progress saved)")
+        sys.stdout.flush()
+        # Worker threads may still be waiting on a request; don't join them.
+        os._exit(130)

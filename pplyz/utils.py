@@ -6,6 +6,10 @@ import sys
 from typing import Sequence
 
 
+class FatalAPIError(RuntimeError):
+    """An error that will fail every row (bad key, no credits); stop processing."""
+
+
 def format_error_message(error: Exception | str, limit: int = 400) -> str:
     """Trim error output to avoid flooding logs with large payloads."""
     message = str(error).strip()
